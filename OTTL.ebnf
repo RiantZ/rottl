@@ -8,58 +8,49 @@ ROOT = { STATEMENT } ;
 STATEMENT = EDITOR_INVOCATION, [ WHERE_CLAUSE ] ;
 WHERE_CLAUSE = "where", BOOLEAN_EXPRESSION ;
 
-# --- Function / invocation forms
-# Editor invocation (mutating function). Semantic rule: exactly one Editor invocation per statement.
-EDITOR_INVOCATION = LOWER_IDENT_FUNCTION_CALL ;
+# Editor invocation (function that mutates telemetry). Identifier must start lowercase.
+EDITOR_INVOCATION = LOWER_IDENT, "(", [ ARG_LIST ], ")" ;
 
-LOWER_IDENT_FUNCTION_CALL = LOWER_IDENT, "(", [ ARG_LIST ], ")" ;
+# Converter invocation: identifier starts with uppercase letter, may be indexed by keys
+CONVERTER_INVOCATION = UPPER_IDENT, "(", [ ARG_LIST ], ")", { INDEX } ;
 
-# Generic function or converter call (used in values). Converters typically start with uppercase.
-FUNCTION_CALL = ( UPPER_IDENT_FUNCTION_CALL | LOWER_IDENT_FUNCTION_CALL ) ;
-UPPER_IDENT_FUNCTION_CALL = UPPER_IDENT, "(", [ ARG_LIST ], ")" ;
+# Generic function invocation: can be Converter or Editor or other functions
+FUNCTION_INVOCATION = ( CONVERTER_INVOCATION | EDITOR_INVOCATION | LOWER_IDENT, "(", [ ARG_LIST ], ")" ) ;
 
-# Converters (and any expression) may be post-indexed: e.g. Concat(...)[1] or ParseJSON(...)["k"]
-INDEXABLE = ( PATH | FUNCTION_CALL | LIST | MAP | LITERAL ), { INDEX } ;
+ARG_LIST = ARG, { ",", ARG } ;
+ARG = [ NAMED_ARG ], VALUE | NAMED_ARG ;
+NAMED_ARG = LOWER_IDENT, ("=" | ":"), VALUE ;
 
-# --- Arguments
-# Argument list: positional arguments first (zero or more), then named arguments (zero or more).
-# Named arguments use `name = value` where name is snake_case (lowercase letters, digits, underscores).
-ARG_LIST = [ POSITIONAL_ARGS ], [ NAMED_ARG_LIST ] ;
-POSITIONAL_ARGS = POSITIONAL_ARG, { ",", POSITIONAL_ARG } ;
-POSITIONAL_ARG = VALUE ;
-NAMED_ARG_LIST = NAMED_ARG, { ",", NAMED_ARG } ;
-NAMED_ARG = LOWER_IDENT, "=", VALUE ;
-
-# --- Values (used as arguments or in expressions)
+# Values — where values can appear as function arguments or in expressions
 VALUE = (
     PATH
   | LIST
   | MAP
   | LITERAL
   | ENUM
-  | FUNCTION_CALL
+  | CONVERTER_INVOCATION
+  | FUNCTION_INVOCATION
   | MATH_EXPRESSION
 ) ;
 
-# --- Paths
-# Paths start with a lowercase context identifier (resource, span, metric, log, etc.)
-# and use dot-separated segments and optional indexing. Interpretation of path segments
-# and number/meaning of indexes is context-specific (see contexts/* READMEs).
-PATH = LOWER_IDENT, { ".", PATH_SEGMENT }, { INDEX } ;
-PATH_SEGMENT = IDENT | DIGIT_IDENT ;
-INDEX = "[", INDEX_KEY, "]" ;
-INDEX_KEY = STRING_LITERAL | INT_LITERAL | MATH_EXPRESSION | FUNCTION_CALL | PATH ;
+# PATH: starts with lowercase identifier (context), dotted segments, and optional indexes
+PATH = LOWER_IDENT, { ".", IDENT_SEGMENT }, { INDEX } ;
+IDENT_SEGMENT = LOWER_IDENT | UPPER_IDENT | DIGIT_IDENT ;
+INDEX = "[", ( STRING_LITERAL | INT_LITERAL | EXPRESSION_INSIDE_INDEX ), "]" ;
+EXPRESSION_INSIDE_INDEX = CONVERTER_INVOCATION | PATH | MATH_EXPRESSION | VALUE ;
 
-# --- Lists and maps
+# LIST
 LIST = "[", [ VALUE, { ",", VALUE } ], "]" ;
+
+# MAP
 MAP = "{", [ MAP_ENTRY, { ",", MAP_ENTRY } ], "}" ;
 MAP_ENTRY = STRING_LITERAL, ":", VALUE ;
 
-# --- Literals
+# LITERALS
 LITERAL = STRING_LITERAL | INT_LITERAL | FLOAT_LITERAL | BOOL_LITERAL | NIL_LITERAL | BYTES_LITERAL ;
 STRING_LITERAL = '"', { STRING_CHAR }, '"' ;
 STRING_CHAR = ? any character except double-quote or backslash ? | ESCAPE_SEQ ;
-ESCAPE_SEQ = "\\", ( "\\" | '"' | "n" | "r" | "t" | "0" | "u" , HEXDIGIT , HEXDIGIT , HEXDIGIT , HEXDIGIT ) ;
+ESCAPE_SEQ = "\\" , ("\\" | '"' | "n" | "r" | "t" | "0" | "u" , HEXDIGIT , HEXDIGIT , HEXDIGIT , HEXDIGIT ) ;
 INT_LITERAL = [ SIGN ], DIGIT, { DIGIT } ;
 FLOAT_LITERAL = [ SIGN ], ( DIGIT, { DIGIT }, ".", { DIGIT } | ".", DIGIT, { DIGIT } ) ;
 SIGN = "+" | "-" ;
@@ -67,56 +58,61 @@ BOOL_LITERAL = "true" | "false" ;
 NIL_LITERAL = "nil" ;
 BYTES_LITERAL = "0x", HEXDIGIT, { HEXDIGIT } ;
 
-# --- Enums (interpreted by context-specific EnumParser). Uppercase identifiers with underscores allowed.
+# ENUM: uppercase identifier (interpreted by user-provided EnumParser)
 ENUM = UPPER_IDENT ;
 
-# --- Math expressions (precedence: * /  > + -). Unary + and - supported.
-MATH_EXPRESSION = MATH_TERM, { ( "+" | "-" ), MATH_TERM } ;
-MATH_TERM = MATH_FACTOR, { ( "*" | "/" ), MATH_FACTOR } ;
-MATH_FACTOR = [ ( "+" | "-" ) ], MATH_PRIMARY ;
-MATH_PRIMARY = LITERAL | PATH | FUNCTION_CALL | "(", MATH_EXPRESSION, ")" ;
+# Math expressions with precedence: +/-, */,
+MATH_EXPRESSION = MATH_TERM, { ("+" | "-"), MATH_TERM } ;
+MATH_TERM = MATH_FACTOR, { ("*" | "/"), MATH_FACTOR } ;
+MATH_FACTOR = [ ("+" | "-") ], MATH_PRIMARY ;
+MATH_PRIMARY = LITERAL | PATH | CONVERTER_INVOCATION | "(", MATH_EXPRESSION, ")" ;
 
-# --- Boolean expressions (precedence: not > and > or)
-BOOLEAN_EXPRESSION = BOOLEAN_OR ;
-BOOLEAN_OR = BOOLEAN_AND, { "or", BOOLEAN_AND } ;
-BOOLEAN_AND = BOOLEAN_NOT, { "and", BOOLEAN_NOT } ;
-BOOLEAN_NOT = [ "not" ], BOOLEAN_ATOM ;
-BOOLEAN_ATOM = "(", BOOLEAN_EXPRESSION, ")" | BOOLEAN_VALUE ;
-BOOLEAN_VALUE = BOOL_LITERAL | FUNCTION_CALL | COMPARISON ;
+# Boolean expressions with precedence: not > and > or
+BOOLEAN_EXPRESSION = BOOLEAN_TERM, { "or", BOOLEAN_TERM } ;
+BOOLEAN_TERM = BOOLEAN_FACTOR, { "and", BOOLEAN_FACTOR } ;
+BOOLEAN_FACTOR = [ "not" ], BOOLEAN_PRIMARY ;
+BOOLEAN_PRIMARY = "(", BOOLEAN_EXPRESSION, ")" | BOOLEAN_VALUE ;
+
+BOOLEAN_VALUE = BOOL_LITERAL | CONVERTER_INVOCATION | COMPARISON ;
 
 COMPARISON = VALUE, COMP_OP, VALUE ;
 COMP_OP = "==" | "!=" | "<" | ">" | "<=" | ">=" ;
 
-# --- Helper / token productions
-IDENT = LETTER, { IDENT_CHAR } ;
-IDENT_CHAR = LETTER | DIGIT | "_" ;
+# Auxiliary productions
+ARGUMENTS = ARG_LIST ;
 
-# Lowercase identifier (editors, path context start, named args): must start with lowercase letter
-LOWER_IDENT = LOWER, { IDENT_CHAR } ;
-# Uppercase identifier (converters, enums, some functions): must start with uppercase letter
-UPPER_IDENT = UPPER, { IDENT_CHAR } ;
-DIGIT_IDENT = DIGIT, { IDENT_CHAR } ;
-
+# Tokens / Lexical
+IDENT_START = LETTER ;
 LETTER = LOWER | UPPER ;
 LOWER = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" ;
 UPPER = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" ;
 DIGIT = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
 HEXDIGIT = DIGIT | "a" | "b" | "c" | "d" | "e" | "f" | "A" | "B" | "C" | "D" | "E" | "F" ;
 
-# Keywords (case-sensitive) used in grammar: where, and, or, not, true, false, nil
+IDENT = IDENT_START, { IDENT_CHAR } ;
+IDENT_CHAR = LETTER | DIGIT | "_" ;
 
-# --- Index / path notes
-# Multiple indexes may be chained, and index expressions can themselves be paths, function calls or math expressions.
+LOWER_IDENT = LOWER, { IDENT_CHAR } ;
+UPPER_IDENT = UPPER, { IDENT_CHAR } ;
+DIGIT_IDENT = DIGIT, { IDENT_CHAR } ;
 
-# --- Comments and whitespace (lexical elements — lexer should skip these)
+INT = DIGIT, { DIGIT } ;
+
+# Convenience productions used above
+INT_LITERAL = [ SIGN ], INT ;
+
+# Expressions allowed in indexes may include math, converters, or other Paths.
+
+# Comments and whitespace (for lexer stage — parsers should skip these tokens)
 COMMENT = "//", { ? any char except newline ? } , NEWLINE | "#", { ? any char except newline ? }, NEWLINE ;
 NEWLINE = "\n" | "\r\n" ;
-WS = ( " " | "\t" | NEWLINE ), { " " | "\t" | NEWLINE } ;
+WS = (" " | "\t" | NEWLINE ), { (" " | "\t" | NEWLINE ) } ;
 
-# --- Semantics & implementation notes (not formal syntax):
-# - Editors: identifiers begin with a lowercase letter and are the top-level invocations in statements.
-# - Converters and many utility functions begin with an uppercase letter; they return values and may be indexed.
-# - Named arguments are written as `name = value` and generally follow positional arguments.
-# - Enums are uppercase symbols parsed at parse-time against a context-provided EnumParser.
-# - Path interpretation (what segments mean, which indexes are valid) is provided by a Context's PathExpressionParser (see contexts/*).
-# - Comparison and type-coercion rules are governed by LANGUAGE.md; EBNF only captures syntax.
+# End
+
+# Notes / semantics (not part of formal EBNF):
+# - Editors: identifiers must start with a lowercase letter; a Statement must contain a single Editor invocation.
+# - Converters: identifiers must start with an uppercase letter; may be followed by indexing using ["key"] or [0] etc.
+# - Enums: uppercase identifiers interpreted to int64 by user-provided EnumParser at parse-time.
+# - Math expressions follow typical precedence; mixing int64 and float64 is a runtime error per LANGUAGE.md.
+# - Comparison rules, value typing and indexing behaviors are governed by host context implementation described in LANGUAGE.md.

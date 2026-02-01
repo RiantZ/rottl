@@ -1,0 +1,122 @@
+# OTTL.ebnf — Expanded OTTL grammar in Extended Backus–Naur Form (EBNF)
+# Source: OpenTelemetry OTTL `LANGUAGE.md`, `README.md`, `ottlfuncs` and `contexts/*` README files
+# EBNF conventions used: { } repetition, [ ] optional, ( ) grouping, | alternation
+
+ROOT = { STATEMENT } ;
+
+# A single OTTL statement: an Editor invocation and optional condition
+STATEMENT = EDITOR_INVOCATION, [ WHERE_CLAUSE ] ;
+WHERE_CLAUSE = "where", BOOLEAN_EXPRESSION ;
+
+# --- Function / invocation forms
+# Editor invocation (mutating function). Semantic rule: exactly one Editor invocation per statement.
+EDITOR_INVOCATION = LOWER_IDENT_FUNCTION_CALL ;
+
+LOWER_IDENT_FUNCTION_CALL = LOWER_IDENT, "(", [ ARG_LIST ], ")" ;
+
+# Generic function or converter call (used in values). Converters typically start with uppercase.
+FUNCTION_CALL = ( UPPER_IDENT_FUNCTION_CALL | LOWER_IDENT_FUNCTION_CALL ) ;
+UPPER_IDENT_FUNCTION_CALL = UPPER_IDENT, "(", [ ARG_LIST ], ")" ;
+
+# Converters (and any expression) may be post-indexed: e.g. Concat(...)[1] or ParseJSON(...)["k"]
+INDEXABLE = ( PATH | FUNCTION_CALL | LIST | MAP | LITERAL ), { INDEX } ;
+
+# --- Arguments
+# Argument list: positional arguments first (zero or more), then named arguments (zero or more).
+# Named arguments use `name = value` where name is snake_case (lowercase letters, digits, underscores).
+ARG_LIST = [ POSITIONAL_ARGS ], [ NAMED_ARG_LIST ] ;
+POSITIONAL_ARGS = POSITIONAL_ARG, { ",", POSITIONAL_ARG } ;
+POSITIONAL_ARG = VALUE ;
+NAMED_ARG_LIST = NAMED_ARG, { ",", NAMED_ARG } ;
+NAMED_ARG = LOWER_IDENT, "=", VALUE ;
+
+# --- Values (used as arguments or in expressions)
+VALUE = (
+    PATH
+  | LIST
+  | MAP
+  | LITERAL
+  | ENUM
+  | FUNCTION_CALL
+  | MATH_EXPRESSION
+) ;
+
+# --- Paths
+# Paths start with a lowercase context identifier (resource, span, metric, log, etc.)
+# and use dot-separated segments and optional indexing. Interpretation of path segments
+# and number/meaning of indexes is context-specific (see contexts/* READMEs).
+PATH = LOWER_IDENT, { ".", PATH_SEGMENT }, { INDEX } ;
+PATH_SEGMENT = IDENT | DIGIT_IDENT ;
+INDEX = "[", INDEX_KEY, "]" ;
+INDEX_KEY = STRING_LITERAL | INT_LITERAL | MATH_EXPRESSION | FUNCTION_CALL | PATH ;
+
+# --- Lists and maps
+LIST = "[", [ VALUE, { ",", VALUE } ], "]" ;
+MAP = "{", [ MAP_ENTRY, { ",", MAP_ENTRY } ], "}" ;
+MAP_ENTRY = STRING_LITERAL, ":", VALUE ;
+
+# --- Literals
+LITERAL = STRING_LITERAL | INT_LITERAL | FLOAT_LITERAL | BOOL_LITERAL | NIL_LITERAL | BYTES_LITERAL ;
+STRING_LITERAL = '"', { STRING_CHAR }, '"' ;
+STRING_CHAR = ? any character except double-quote or backslash ? | ESCAPE_SEQ ;
+ESCAPE_SEQ = "\\", ( "\\" | '"' | "n" | "r" | "t" | "0" | "u" , HEXDIGIT , HEXDIGIT , HEXDIGIT , HEXDIGIT ) ;
+INT_LITERAL = [ SIGN ], DIGIT, { DIGIT } ;
+FLOAT_LITERAL = [ SIGN ], ( DIGIT, { DIGIT }, ".", { DIGIT } | ".", DIGIT, { DIGIT } ) ;
+SIGN = "+" | "-" ;
+BOOL_LITERAL = "true" | "false" ;
+NIL_LITERAL = "nil" ;
+BYTES_LITERAL = "0x", HEXDIGIT, { HEXDIGIT } ;
+
+# --- Enums (interpreted by context-specific EnumParser). Uppercase identifiers with underscores allowed.
+ENUM = UPPER_IDENT ;
+
+# --- Math expressions (precedence: * /  > + -). Unary + and - supported.
+MATH_EXPRESSION = MATH_TERM, { ( "+" | "-" ), MATH_TERM } ;
+MATH_TERM = MATH_FACTOR, { ( "*" | "/" ), MATH_FACTOR } ;
+MATH_FACTOR = [ ( "+" | "-" ) ], MATH_PRIMARY ;
+MATH_PRIMARY = LITERAL | PATH | FUNCTION_CALL | "(", MATH_EXPRESSION, ")" ;
+
+# --- Boolean expressions (precedence: not > and > or)
+BOOLEAN_EXPRESSION = BOOLEAN_OR ;
+BOOLEAN_OR = BOOLEAN_AND, { "or", BOOLEAN_AND } ;
+BOOLEAN_AND = BOOLEAN_NOT, { "and", BOOLEAN_NOT } ;
+BOOLEAN_NOT = [ "not" ], BOOLEAN_ATOM ;
+BOOLEAN_ATOM = "(", BOOLEAN_EXPRESSION, ")" | BOOLEAN_VALUE ;
+BOOLEAN_VALUE = BOOL_LITERAL | FUNCTION_CALL | COMPARISON ;
+
+COMPARISON = VALUE, COMP_OP, VALUE ;
+COMP_OP = "==" | "!=" | "<" | ">" | "<=" | ">=" ;
+
+# --- Helper / token productions
+IDENT = LETTER, { IDENT_CHAR } ;
+IDENT_CHAR = LETTER | DIGIT | "_" ;
+
+# Lowercase identifier (editors, path context start, named args): must start with lowercase letter
+LOWER_IDENT = LOWER, { IDENT_CHAR } ;
+# Uppercase identifier (converters, enums, some functions): must start with uppercase letter
+UPPER_IDENT = UPPER, { IDENT_CHAR } ;
+DIGIT_IDENT = DIGIT, { IDENT_CHAR } ;
+
+LETTER = LOWER | UPPER ;
+LOWER = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" ;
+UPPER = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" ;
+DIGIT = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+HEXDIGIT = DIGIT | "a" | "b" | "c" | "d" | "e" | "f" | "A" | "B" | "C" | "D" | "E" | "F" ;
+
+# Keywords (case-sensitive) used in grammar: where, and, or, not, true, false, nil
+
+# --- Index / path notes
+# Multiple indexes may be chained, and index expressions can themselves be paths, function calls or math expressions.
+
+# --- Comments and whitespace (lexical elements — lexer should skip these)
+COMMENT = "//", { ? any char except newline ? } , NEWLINE | "#", { ? any char except newline ? }, NEWLINE ;
+NEWLINE = "\n" | "\r\n" ;
+WS = ( " " | "\t" | NEWLINE ), { " " | "\t" | NEWLINE } ;
+
+# --- Semantics & implementation notes (not formal syntax):
+# - Editors: identifiers begin with a lowercase letter and are the top-level invocations in statements.
+# - Converters and many utility functions begin with an uppercase letter; they return values and may be indexed.
+# - Named arguments are written as `name = value` and generally follow positional arguments.
+# - Enums are uppercase symbols parsed at parse-time against a context-provided EnumParser.
+# - Path interpretation (what segments mean, which indexes are valid) is provided by a Context's PathExpressionParser (see contexts/*).
+# - Comparison and type-coercion rules are governed by LANGUAGE.md; EBNF only captures syntax.

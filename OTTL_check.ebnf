@@ -1,0 +1,94 @@
+<ws> ::= (" " | "\t")*
+
+<root> ::= <statement>*
+
+<statement> ::= <ws>? <editor_invocation> <ws>? <where_clause>?
+
+<where_clause> ::= <ws>? "where" <ws>? <boolean_expression> <ws>?
+
+<editor_invocation> ::= <lower_ident> "(" <arg_list>? ")"
+
+<converter_invocation> ::= <upper_ident> "(" <arg_list>? ")" <index>*
+
+<function_invocation> ::= <converter_invocation> | <editor_invocation>
+
+<arg> ::= <named_arg>? <value> | <named_arg>
+
+<arg_list> ::= <arg> ("," <arg>)*
+
+<named_arg> ::= <lower_ident> ("=" | ":") <value>
+
+<value> ::= <path> | <list> | <map> | <literal> | <enum> | <converter_invocation> | <function_invocation> | <math_expression>
+
+<path> ::= <lower_ident> ("." <ident_segment>)* <index>*
+
+<ident_segment> ::= <lower_ident> | <upper_ident> | <digit_ident>
+
+<index> ::= "[" (<string_literal> | <int_literal>) "]"
+
+<list> ::= "[" (<value> ("," <value>)*)? "]"
+
+<map> ::= "{" (<map_entry> ("," <map_entry>)*)? "}"
+
+<map_entry> ::= <string_literal> ":" <value>
+
+<sign> ::= "+" | "-"
+
+<literal> ::= <string_literal> | <int_literal> | <float_literal> | <bool_literal> | <nil_literal> | <bytes_literal>
+
+<string_literal> ::= "\"" <string_char>* "\""
+
+<string_char> ::= [a-z] | [A-Z] | [0-9] | " " | "!" | "#" | "$" | "%" | "&" | "'" | "(" | ")" | "*" | "+" | "," | "-" | "." | "/" | ":" | ";" | "<" | "=" | ">" | "?" | "@" | "[" | "\\" | "]" | "^" | "_" | "`" | "{" | "|" | "}" | "~"
+
+<float_literal> ::= <sign>? ([0-9]+ "." [0-9]* | "." [0-9]+)
+
+<int_literal> ::= <ws>? <sign>? [0-9]+ <ws>?
+
+<bool_literal> ::= "true" | "false"
+
+<nil_literal> ::= "nil"
+
+<bytes_literal> ::= "0x" <hexdigit>+
+
+<math_expression> ::= <math_term> (("+" | "-") <math_term>)*
+
+<math_term> ::= <math_factor> (("*" | "/") <math_factor>)*
+
+<math_factor> ::= ("+" | "-")? <math_primary>
+
+<math_primary> ::= <literal> | <path> | <converter_invocation> | "(" <math_expression> ")"
+
+<boolean_expression> ::= <boolean_term> ("or" <boolean_term>)*
+
+<boolean_term> ::= <boolean_factor> ("and" <boolean_factor>)*
+
+<boolean_factor> ::= "not"? <boolean_primary>
+
+<boolean_primary> ::= "(" <boolean_expression> ")" | <boolean_value>
+
+<boolean_value> ::= <bool_literal> | <converter_invocation> | <comparison>
+
+<comparison> ::= <value> <comp_op> <value>
+
+<comp_op> ::= "==" | "!=" | "<" | ">" | "<=" | ">="
+
+<lower> ::= [a-z]
+
+<upper> ::= [A-Z]
+
+<digit> ::= [0-9]
+
+<hexdigit> ::= [0-9] | [a-f] | [A-F]
+
+<letter> ::= [a-z] | [A-Z]
+
+<ident_char> ::= [a-z] | [A-Z] | [0-9] | "_"
+
+<lower_ident> ::= [a-z] <ident_char>*
+
+<upper_ident> ::= [A-Z] <ident_char>*
+
+<digit_ident> ::= [0-9] <ident_char>*
+
+<enum> ::= <ws>? [A-Z] ([0-9] | [A-Z] | "_")* <ws>?
+

@@ -21,11 +21,9 @@ CONVERTER_INVOCATION = UPPER_IDENT, [WS], "(", [WS], [ARG_LIST], [WS], ")", {IND
 (*Generic function invocation: can be Converter or Editor or other functions*)
 FUNCTION_INVOCATION = (CONVERTER_INVOCATION | EDITOR_INVOCATION);
 
-ARG = [WS], ([NAMED_ARG], VALUE | NAMED_ARG), [WS];
-
-ARG_LIST = ARG, {[WS], ",", ARG};
-
 NAMED_ARG = LOWER_IDENT, [WS], "=", [WS], VALUE;
+
+ARG_LIST = (VALUE, {[WS], ",", VALUE}, {[WS], ",", NAMED_ARG}) | (NAMED_ARG, {[WS], ",", NAMED_ARG});
 
 (*Values — where values can appear as function arguments or in expressions*)
 VALUE = [WS], (PATH | LIST | MAP | LITERAL | ENUM | CONVERTER_INVOCATION | FUNCTION_INVOCATION | MATH_EXPRESSION), [WS];

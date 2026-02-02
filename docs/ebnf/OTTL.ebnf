@@ -5,45 +5,45 @@ WS = {" " | "\t"};
 Source: OpenTelemetry OTTL `LANGUAGE.md`, `README.md`, `ottlfuncs` and `contexts/*` README files
 EBNF conventions used: { } repetition, [ ] optional, ( ) grouping, | alternation 
 A single OTTL statement: an Editor invocation and optional condition*)
-ROOT = (EDITOR_INVOCATION_STATEMENT | BOOLEAN_EXPRESSION);
+ROOT = [WS], (EDITOR_INVOCATION_STATEMENT | BOOLEAN_EXPRESSION), [WS];
 
-EDITOR_INVOCATION_STATEMENT = [WS], EDITOR_INVOCATION, [WS], [WHERE_CLAUSE];
+EDITOR_INVOCATION_STATEMENT = EDITOR_INVOCATION, [WHERE_CLAUSE];
 
-WHERE_CLAUSE = [WS], "where", [WS], BOOLEAN_EXPRESSION, [WS];
+WHERE_CLAUSE = [WS], "where", [WS], BOOLEAN_EXPRESSION;
 
 (*Editor invocation (function that mutates telemetry). Identifier must start lowercase.
 Semantic rule: exactly one Editor invocation per statement.*)
-EDITOR_INVOCATION = LOWER_IDENT, "(", [ARG_LIST], ")";
+EDITOR_INVOCATION = LOWER_IDENT, [WS], "(", [WS], [ARG_LIST], [WS], ")";
 
 (*Converter invocation: identifier starts with uppercase letter, may be indexed by keys*)
-CONVERTER_INVOCATION = UPPER_IDENT, "(", [ARG_LIST], ")", {INDEX};
+CONVERTER_INVOCATION = UPPER_IDENT, [WS], "(", [WS], [ARG_LIST], [WS], ")", {INDEX};
 
 (*Generic function invocation: can be Converter or Editor or other functions*)
 FUNCTION_INVOCATION = (CONVERTER_INVOCATION | EDITOR_INVOCATION);
 
-ARG = [NAMED_ARG], VALUE | NAMED_ARG;
+ARG = [WS], ([NAMED_ARG], VALUE | NAMED_ARG), [WS];
 
-ARG_LIST = ARG, {",", ARG};
+ARG_LIST = ARG, {[WS], ",", ARG};
 
-NAMED_ARG = LOWER_IDENT, "=", VALUE;
+NAMED_ARG = LOWER_IDENT, [WS], "=", [WS], VALUE;
 
 (*Values — where values can appear as function arguments or in expressions*)
-VALUE = (PATH | LIST | MAP | LITERAL | ENUM | CONVERTER_INVOCATION | FUNCTION_INVOCATION | MATH_EXPRESSION);
+VALUE = [WS], (PATH | LIST | MAP | LITERAL | ENUM | CONVERTER_INVOCATION | FUNCTION_INVOCATION | MATH_EXPRESSION), [WS];
 
 (*PATH: starts with lowercase identifier (context), dotted segments, and optional indexes*)
 PATH = LOWER_IDENT, {".", IDENT_SEGMENT}, {INDEX};
 
 IDENT_SEGMENT = LOWER_IDENT | UPPER_IDENT | DIGIT_IDENT;
 
-INDEX = "[", (STRING_LITERAL | INT_LITERAL), "]";
+INDEX = "[", [WS], (STRING_LITERAL | INT_LITERAL), [WS], "]";
 
 (*LIST*)
-LIST = "[", [VALUE, {",", VALUE}], "]";
+LIST = "[", [WS], [VALUE, {[WS], ",", VALUE}], [WS], "]";
 
 (*MAP*)
-MAP = "{", [MAP_ENTRY, {",", MAP_ENTRY}], "}";
+MAP = "{", [WS], [MAP_ENTRY, {[WS], ",", [WS], MAP_ENTRY}], [WS], "}";
 
-MAP_ENTRY = STRING_LITERAL, ":", VALUE;
+MAP_ENTRY = STRING_LITERAL, [WS], ":", [WS], VALUE;
 
 SIGN = "+" | "-";
 
@@ -54,34 +54,33 @@ STRING_LITERAL = '"', {UPPER | LOWER | DIGIT | " " | "!" | "#" | "$" | "%" | "&"
 
 FLOAT_LITERAL = [SIGN], (DIGIT, {DIGIT}, ".", {DIGIT} | ".", DIGIT, {DIGIT});
 
-(*Convenience productions used above*)
-INT_LITERAL = [WS], [SIGN], DIGIT, {DIGIT}, [WS];
+INT_LITERAL = [SIGN], DIGIT, {DIGIT};
 
 BOOL_LITERAL = "true" | "false";
 
 NIL_LITERAL = "nil";
 
 (*Math expressions with precedence: +/-, */ *)
-MATH_EXPRESSION = MATH_TERM, {("+" | "-"), MATH_TERM};
+MATH_EXPRESSION = MATH_TERM, {[WS], ("+" | "-"), [WS], MATH_TERM};
 
-MATH_TERM = MATH_FACTOR, {("*" | "/"), MATH_FACTOR};
+MATH_TERM = MATH_FACTOR, {[WS], ("*" | "/"), [WS], MATH_FACTOR};
 
-MATH_FACTOR = [("+" | "-")], MATH_PRIMARY;
+MATH_FACTOR = [("+" | "-")], [WS], MATH_PRIMARY;
 
-MATH_PRIMARY = LITERAL | PATH | CONVERTER_INVOCATION | "(", MATH_EXPRESSION, ")";
+MATH_PRIMARY = LITERAL | PATH | CONVERTER_INVOCATION | "(", [WS], MATH_EXPRESSION, [WS], ")";
 
 (*Boolean expressions with precedence: not > and > or*)
-BOOLEAN_EXPRESSION = BOOLEAN_TERM, {"or", BOOLEAN_TERM};
+BOOLEAN_EXPRESSION = BOOLEAN_TERM, {[WS], "or", [WS], BOOLEAN_TERM};
 
-BOOLEAN_TERM = BOOLEAN_FACTOR, {"and", BOOLEAN_FACTOR};
+BOOLEAN_TERM = BOOLEAN_FACTOR, {[WS], "and", [WS], BOOLEAN_FACTOR};
 
-BOOLEAN_FACTOR = ["not"], BOOLEAN_PRIMARY;
+BOOLEAN_FACTOR = ["not", [WS]], BOOLEAN_PRIMARY;
 
-BOOLEAN_PRIMARY = "(", BOOLEAN_EXPRESSION, ")" | BOOLEAN_VALUE;
+BOOLEAN_PRIMARY = "(", [WS], BOOLEAN_EXPRESSION, [WS], ")" | BOOLEAN_VALUE;
 
 BOOLEAN_VALUE = BOOL_LITERAL | CONVERTER_INVOCATION | COMPARISON;
 
-COMPARISON = VALUE, COMP_OP, VALUE;
+COMPARISON = VALUE, [WS], COMP_OP, [WS], VALUE;
 
 COMP_OP = "==" | "!=" | "<" | ">" | "<=" | ">=";
 
@@ -106,7 +105,7 @@ UPPER_IDENT = UPPER, {IDENT_CHAR};
 DIGIT_IDENT = DIGIT, {IDENT_CHAR};
 
 (*ENUM: uppercase identifier (interpreted by user-provided EnumParser)*)
-ENUM = [WS], UPPER, {DIGIT | UPPER | "_"}, [WS];
+ENUM = UPPER, {DIGIT | UPPER | "_"};
 
 (*
 Notes / semantics (not part of formal EBNF):

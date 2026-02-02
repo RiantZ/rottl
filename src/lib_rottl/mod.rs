@@ -1,3 +1,7 @@
+pub mod lexer;
+
+pub use lexer::{Token, Lexer};
+
 /// Простая функция, принимающая строку и возвращающая строку
 pub fn get(input: &str) -> String {
     format!("Received: {}", input)

@@ -31,7 +31,7 @@ VALUE = [WS], (PATH | LIST | MAP | LITERAL | ENUM | CONVERTER_INVOCATION | FUNCT
 (*PATH: starts with lowercase identifier (context), dotted segments, and optional indexes*)
 PATH = LOWER_IDENT, {".", IDENT_SEGMENT}, {INDEX};
 
-IDENT_SEGMENT = LOWER_IDENT | UPPER_IDENT | DIGIT_IDENT;
+IDENT_SEGMENT = LOWER_IDENT | UPPER_IDENT;
 
 INDEX = "[", [WS], (STRING_LITERAL | INT_LITERAL), [WS], "]";
 
@@ -99,8 +99,6 @@ IDENT_CHAR = LETTER | DIGIT | "_";
 LOWER_IDENT = LOWER, {IDENT_CHAR};
 
 UPPER_IDENT = UPPER, {IDENT_CHAR};
-
-DIGIT_IDENT = DIGIT, {IDENT_CHAR};
 
 (*ENUM: uppercase identifier (interpreted by user-provided EnumParser)*)
 ENUM = UPPER, {DIGIT | UPPER | "_"};

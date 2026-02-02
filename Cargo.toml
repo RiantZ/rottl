@@ -7,3 +7,6 @@ edition = "2021"
 path = "src/lib_rottl/mod.rs"
 
 [dependencies]
+logos = "0.14"
+
+[dev-dependencies]

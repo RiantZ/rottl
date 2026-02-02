@@ -1,10 +1,10 @@
 use logos::Logos;
 
-/// Токены OTTL языка
+/// OTTL language tokens
 #[derive(Logos, Debug, PartialEq, Clone)]
-#[logos(skip r"[ \t]+")] // Пропускаем пробелы и табуляции
+#[logos(skip r"[ \t]+")] // Skip spaces and tabs
 pub enum Token<'a> {
-    // ===== Ключевые слова =====
+    // ===== Keywords =====
     #[token("where")]
     Where,
 
@@ -26,7 +26,7 @@ pub enum Token<'a> {
     #[token("nil")]
     Nil,
 
-    // ===== Операторы сравнения =====
+    // ===== Comparison operators =====
     #[token("==")]
     Eq,
 
@@ -45,7 +45,7 @@ pub enum Token<'a> {
     #[token(">")]
     Greater,
 
-    // ===== Арифметические операторы =====
+    // ===== Arithmetic operators =====
     #[token("+")]
     Plus,
 
@@ -58,7 +58,7 @@ pub enum Token<'a> {
     #[token("/")]
     Slash,
 
-    // ===== Разделители =====
+    // ===== Delimiters =====
     #[token("(")]
     LParen,
 
@@ -89,12 +89,12 @@ pub enum Token<'a> {
     #[token("=")]
     Assign,
 
-    // ===== Литералы =====
-    /// Строковый литерал: "..."
+    // ===== Literals =====
+    /// String literal: "..."
     #[regex(r#""[^"\\]*(?:\\.[^"\\]*)*""#, |lex| lex.slice())]
     StringLiteral(&'a str),
 
-    /// Байтовый литерал: 0xDEADBEEF
+    /// Bytes literal: 0xDEADBEEF
     #[regex(r"0x[0-9a-fA-F]+", |lex| lex.slice())]
     BytesLiteral(&'a str),
 
@@ -102,40 +102,40 @@ pub enum Token<'a> {
     #[regex(r"[+-]?([0-9]+\.[0-9]*|\.[0-9]+)", |lex| lex.slice())]
     FloatLiteral(&'a str),
 
-    /// Целочисленный литерал: 42, -10, +5
+    /// Integer literal: 42, -10, +5
     #[regex(r"[+-]?[0-9]+", priority = 2, callback = |lex| lex.slice())]
     IntLiteral(&'a str),
 
-    // ===== Идентификаторы =====
-    /// Идентификатор с заглавной буквы (Converter или Enum)
+    // ===== Identifiers =====
+    /// Uppercase identifier (Converter or Enum)
     #[regex(r"[A-Z][a-zA-Z0-9_]*", |lex| lex.slice())]
     UpperIdent(&'a str),
 
-    /// Идентификатор с маленькой буквы (Editor, path, named arg)
+    /// Lowercase identifier (Editor, path, named arg)
     #[regex(r"[a-z][a-zA-Z0-9_]*", priority = 1, callback = |lex| lex.slice())]
     LowerIdent(&'a str),
 }
 
-/// Результат лексического анализа
+/// Lexical analysis result
 pub struct Lexer<'a> {
-    inner: logos::Lexer<'a, Token<'a>>,
+    _lexer: logos::Lexer<'a, Token<'a>>,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
-            inner: Token::lexer(input),
+            _lexer: Token::lexer(input),
         }
     }
 
-    /// Собрать все токены в вектор
+    /// Collect all tokens into a vector
     pub fn collect_tokens(input: &'a str) -> Vec<Token<'a>> {
         Token::lexer(input)
             .filter_map(|result| result.ok())
             .collect()
     }
 
-    /// Собрать токены с их позициями
+    /// Collect tokens with their positions (spans)
     pub fn collect_with_spans(input: &'a str) -> Vec<(Token<'a>, std::ops::Range<usize>)> {
         let mut lexer = Token::lexer(input);
         let mut tokens = Vec::new();
@@ -152,7 +152,7 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = Result<Token<'a>, ()>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
+        self._lexer.next()
     }
 }
 

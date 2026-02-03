@@ -38,13 +38,13 @@ pub enum Value {
     /// Map of string keys to values
     Map(HashMap<String, Value>),
     /// A callable function (editor or converter bound at parse time)
-    Function(Arc<dyn Fn(&mut Context, Vec<Argument>) -> EvalResult + Send + Sync>),
+    Function(CallbackFn),
     /// A path accessor (can read and write)
     Path(Arc<dyn PathAccessor + Send + Sync>),
     /// A boolean expression (lazily evaluated)
     BooleanExpr(Arc<dyn Fn(&mut Context) -> Result<bool, EvalError> + Send + Sync>),
     /// A math expression (lazily evaluated)
-    MathExpr(Arc<dyn Fn(&mut Context) -> Result<Value, EvalError> + Send + Sync>),
+    MathExpr(Arc<dyn Fn(&mut Context) -> EvalResult + Send + Sync>),
 }
 
 // =====================================================================================================================
@@ -170,10 +170,10 @@ impl Argument {
 /// Trait for accessing (reading and writing) path values in the context.
 pub trait PathAccessor: fmt::Debug {
     /// Get the value at this path from the context
-    fn get(&self, ctx: &Context) -> Result<Value, EvalError>;
+    fn get(&self, ctx: &Context, path: Vec<String>) -> Result<Value, EvalError>;
 
     /// Set the value at this path in the context
-    fn set(&self, ctx: &mut Context, value: Value) -> Result<(), EvalError>;
+    fn set(&self, ctx: &mut Context, path: Vec<String>, value: Value) -> Result<(), EvalError>;
 }
 
 /// Type alias for the path resolver function.

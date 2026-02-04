@@ -426,7 +426,7 @@ fn test_parser_math_expression() {
         &mut converters,
         &mut enums,
         &mut resolver,
-        "1+2*10",
+        "-1+   2*10 - 10/5 - (1+3*2)",
     );
 
     // Check no parsing errors
@@ -437,7 +437,7 @@ fn test_parser_math_expression() {
     // Execute and check result
     let result = parser.execute(&mut ctx);
     assert!(result.is_ok(), "Execution should succeed: {:?}", result);
-    assert_eq!(result.unwrap(), Value::Int(21));
+    assert_eq!(result.unwrap(), Value::Int(10));
 }
 
 #[test]

@@ -56,6 +56,9 @@ pub type EvalContext = Box<dyn Any>;
 /// Represents all possible values in OTTL expressions and function arguments.
 #[derive(Clone, Default, Debug, PartialEq /* , Eq, PartialOrd - not applicable it seems */)]
 pub enum Value {
+    /// Nil/null value
+    #[default]
+    Nil,
     /// Boolean value (true/false)
     Bool(bool),
     /// 64-bit signed integer
@@ -67,9 +70,6 @@ pub enum Value {
     String(String),
     /// Bytes literal (e.g., 0xC0FFEE)
     Bytes(Vec<u8>),
-    /// Nil/null value
-    #[default] // set nil default for all below!!! ;)
-    Nil,
     /// List of values
     List(Vec<Value>),
     /// Map of string keys to values

@@ -332,3 +332,36 @@ fn test_get() {
     let result = crate::get("hello");
     assert_eq!(result, "Received: hello");
 }
+
+// ============================================================================
+// Parser tests
+// ============================================================================
+
+use crate::parser::{Argument, Value};
+
+#[test]
+fn test_value_equality() {
+    assert_eq!(Value::Bool(true), Value::Bool(true));
+    assert_eq!(Value::Int(42), Value::Int(42));
+    assert_eq!(Value::Float(3.14), Value::Float(3.14));
+    assert_eq!(Value::String("hello".into()), Value::String("hello".into()));
+    assert_eq!(Value::Nil, Value::Nil);
+
+    assert_ne!(Value::Bool(true), Value::Bool(false));
+    assert_ne!(Value::Int(1), Value::Int(2));
+    assert_ne!(Value::Bool(true), Value::Int(1));
+}
+
+#[test]
+fn test_argument_access() {
+    let pos = Argument::Positional(Value::Int(42));
+    assert_eq!(pos.name(), None);
+    assert_eq!(*pos.value(), Value::Int(42));
+
+    let named = Argument::Named {
+        name: "foo".into(),
+        value: Value::String("bar".into()),
+    };
+    assert_eq!(named.name(), Some("foo"));
+    assert_eq!(*named.value(), Value::String("bar".into()));
+}

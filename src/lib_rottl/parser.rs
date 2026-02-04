@@ -134,6 +134,8 @@ pub enum BoolExpr {
     },
     /// Converter call returning boolean
     Converter(Box<FunctionCall>),
+    /// Path that evaluates to boolean
+    Path(PathExpr),
     /// Logical NOT
     Not(Box<BoolExpr>),
     /// Logical AND
@@ -391,6 +393,9 @@ fn build_parser<'a>(
     let editors_clone: std::collections::HashMap<String, CallbackFn> = editors_map.clone();
     let converters_clone: std::collections::HashMap<String, CallbackFn> = converters_map.clone();
 
+    // Clone path for use in bool_expr later
+    let path_for_bool = path.clone();
+
     // Create the value expression parser using recursive
     let value_expr = recursive(move |value_expr| {
         // List: "[" (value ("," value)*)? "]"
@@ -595,8 +600,9 @@ fn build_parser<'a>(
     let bool_expr = recursive({
         let value_expr = value_expr.clone();
         let comparison_value = comparison_value.clone();
+        let path = path_for_bool.clone();
         move |bool_expr| {
-            // BOOLEAN_VALUE = BOOL_LITERAL | CONVERTER_INVOCATION | COMPARISON
+            // BOOLEAN_VALUE = BOOL_LITERAL | CONVERTER_INVOCATION | COMPARISON | PATH
             let bool_literal_expr = select! {
                 Token::True => BoolExpr::Literal(true),
                 Token::False => BoolExpr::Literal(false),
@@ -618,7 +624,11 @@ fn build_parser<'a>(
                 }
             });
 
-            // BOOLEAN_PRIMARY = "(" BOOLEAN_EXPRESSION ")" | COMPARISON | BOOL_LITERAL | CONVERTER
+            // Path that evaluates to boolean
+            let bool_path = path.clone().map(BoolExpr::Path);
+
+            // BOOLEAN_PRIMARY = "(" BOOLEAN_EXPRESSION ")" | COMPARISON | BOOL_LITERAL | CONVERTER | PATH
+            // Note: comparison should come before bool_path to avoid path consuming input meant for comparison
             let bool_primary = choice((
                 bool_expr
                     .clone()
@@ -626,6 +636,7 @@ fn build_parser<'a>(
                 comparison,
                 bool_literal_expr,
                 bool_converter,
+                bool_path,
             ));
 
             // BOOLEAN_FACTOR = ["not"] BOOLEAN_PRIMARY
@@ -741,11 +752,13 @@ fn build_parser<'a>(
             RootExpr::EditorStatement(EditorStatement { editor, condition })
         });
 
-    // Root: editor_statement | math_expression | boolean_expression
+    // Root: editor_statement | boolean_expression | math_expression
+    // Note: bool_expr must come before math_expr because a path like "my.bool.value"
+    // can be parsed as either, but only bool_expr handles "... or ..." correctly
     choice((
         editor_statement,
-        math_expr.map(RootExpr::MathExpression),
         bool_expr.map(RootExpr::BooleanExpression),
+        math_expr.map(RootExpr::MathExpression),
     ))
     .then_ignore(end())
 }
@@ -797,6 +810,13 @@ fn evaluate_bool_expr(
             match result {
                 Value::Bool(b) => Ok(b),
                 _ => Err("Converter did not return a boolean".into()),
+            }
+        }
+        BoolExpr::Path(path) => {
+            let value = evaluate_path(path, ctx, resolver)?;
+            match value {
+                Value::Bool(b) => Ok(b),
+                _ => Err("Path did not return a boolean".into()),
             }
         }
         BoolExpr::Not(inner) => {

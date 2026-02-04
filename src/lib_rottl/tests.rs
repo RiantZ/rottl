@@ -467,3 +467,70 @@ fn test_parser_bool_expression_with_math() {
     assert!(result.is_ok(), "Execution should succeed: {:?}", result);
     assert_eq!(result.unwrap(), Value::Bool(true));
 }
+
+/// PathAccessor that returns predefined values for specific paths
+#[derive(Debug)]
+struct MockPathAccessor {
+    bool_value: Value,
+    int_value: Value,
+}
+
+impl PathAccessor for MockPathAccessor {
+    fn get(&self, _ctx: &EvalContext, path: &String) -> crate::Result<&Value> {
+        match path.as_str() {
+            "my.bool.value" => Ok(&self.bool_value),
+            "my.int.value" => Ok(&self.int_value),
+            _ => Err(format!("Unknown path: {}", path).into()),
+        }
+    }
+
+    fn set(&self, _ctx: &mut EvalContext, _path: &String, _value: &Value) -> crate::Result<()> {
+        Err("MockPathAccessor: set not implemented".into())
+    }
+}
+
+/// Create a PathResolver that returns MockPathAccessor with predefined values
+fn mock_path_resolver(bool_value: bool, int_value: i64) -> PathResolver {
+    let accessor = Arc::new(MockPathAccessor {
+        bool_value: Value::Bool(bool_value),
+        int_value: Value::Int(int_value),
+    });
+    Arc::new(
+        move |_path: &str| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
+            Ok(accessor.clone())
+        },
+    )
+}
+
+#[test]
+fn test_parser_bool_expression_with_paths() {
+    let mut editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+    let mut enums = EnumMap::new();
+    // Create resolver that returns false for my.bool.value and 2 for my.int.value
+    let mut resolver = mock_path_resolver(false, 2);
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(
+        &mut editors,
+        &mut converters,
+        &mut enums,
+        &mut resolver,
+        "my.bool.value or (my.int.value < (1 + 2))",
+    );
+
+    // Check no parsing errors
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    // Execute and check result
+    // my.bool.value = false
+    // my.int.value = 2
+    // 1 + 2 = 3
+    // my.int.value < 3 = 2 < 3 = true
+    // false or true = true
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}

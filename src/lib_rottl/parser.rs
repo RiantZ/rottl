@@ -266,42 +266,51 @@ impl OttlParser for Parser {
 }
 
 // =====================================================================================================================
-// Chumsky Parser Builder
+// Modular Parser Components
 // =====================================================================================================================
 
-/// Build the chumsky parser for OTTL
-fn build_parser<'a>(
-    editors_map: &'a mut CallbackMap,
-    converters_map: &'a mut CallbackMap,
-    enums_map: &'a mut EnumMap,
-) -> impl chumsky::Parser<Token<'a>, RootExpr, Error = Simple<Token<'a>>> + 'a {
-    // Literals
-    let string_literal = select! {
+/// Type alias for parser error
+type ParserError<'a> = Simple<Token<'a>>;
+
+/// Parser for string literals
+fn string_literal_parser<'a>(
+) -> impl ChumskyParser<Token<'a>, Value, Error = ParserError<'a>> + Clone {
+    select! {
         Token::StringLiteral(s) => {
-            // Remove surrounding quotes and handle escapes
             let inner = &s[1..s.len()-1];
             let unescaped = inner.replace("\\\"", "\"").replace("\\\\", "\\");
             Value::String(unescaped)
         }
-    };
+    }
+}
 
-    let int_literal = select! {
+/// Parser for integer literals
+fn int_literal_parser<'a>() -> impl ChumskyParser<Token<'a>, Value, Error = ParserError<'a>> + Clone
+{
+    select! {
         Token::IntLiteral(s) => {
             let val: i64 = s.parse().unwrap_or(0);
             Value::Int(val)
         }
-    };
+    }
+}
 
-    let float_literal = select! {
+/// Parser for float literals
+fn float_literal_parser<'a>(
+) -> impl ChumskyParser<Token<'a>, Value, Error = ParserError<'a>> + Clone {
+    select! {
         Token::FloatLiteral(s) => {
             let val: f64 = s.parse().unwrap_or(0.0);
             Value::Float(val)
         }
-    };
+    }
+}
 
-    let bytes_literal = select! {
+/// Parser for bytes literals
+fn bytes_literal_parser<'a>(
+) -> impl ChumskyParser<Token<'a>, Value, Error = ParserError<'a>> + Clone {
+    select! {
         Token::BytesLiteral(s) => {
-            // Parse hex string (skip "0x" prefix)
             let hex = &s[2..];
             let bytes = (0..hex.len())
                 .step_by(2)
@@ -312,92 +321,203 @@ fn build_parser<'a>(
                 .collect();
             Value::Bytes(bytes)
         }
-    };
+    }
+}
 
-    let bool_literal = select! {
+/// Parser for boolean literals
+fn bool_literal_parser<'a>() -> impl ChumskyParser<Token<'a>, Value, Error = ParserError<'a>> + Clone
+{
+    select! {
         Token::True => Value::Bool(true),
         Token::False => Value::Bool(false),
-    };
+    }
+}
 
-    let nil_literal = just(Token::Nil).to(Value::Nil);
+/// Parser for nil literal
+fn nil_literal_parser<'a>() -> impl ChumskyParser<Token<'a>, Value, Error = ParserError<'a>> + Clone
+{
+    just(Token::Nil).to(Value::Nil)
+}
 
-    let literal = choice((
-        float_literal,
-        int_literal,
-        string_literal,
-        bytes_literal,
-        bool_literal,
-        nil_literal,
+/// Combined parser for all literal types, returning ValueExpr
+fn literal_parser<'a>() -> impl ChumskyParser<Token<'a>, ValueExpr, Error = ParserError<'a>> + Clone
+{
+    choice((
+        float_literal_parser(),
+        int_literal_parser(),
+        string_literal_parser(),
+        bytes_literal_parser(),
+        bool_literal_parser(),
+        nil_literal_parser(),
     ))
-    .map(ValueExpr::Literal);
+    .map(ValueExpr::Literal)
+}
 
-    // Identifiers
-    let lower_ident = select! {
+/// Parser for lowercase identifier
+fn lower_ident_parser<'a>() -> impl ChumskyParser<Token<'a>, String, Error = ParserError<'a>> + Clone
+{
+    select! {
         Token::LowerIdent(s) => s.to_string(),
-    };
+    }
+}
 
-    let upper_ident = select! {
+/// Parser for uppercase identifier
+fn upper_ident_parser<'a>() -> impl ChumskyParser<Token<'a>, String, Error = ParserError<'a>> + Clone
+{
+    select! {
         Token::UpperIdent(s) => s.to_string(),
-    };
+    }
+}
 
-    let ident_segment = lower_ident.clone().or(upper_ident.clone());
+/// Parser for any identifier (lower or upper)
+fn ident_parser<'a>() -> impl ChumskyParser<Token<'a>, String, Error = ParserError<'a>> + Clone {
+    lower_ident_parser().or(upper_ident_parser())
+}
 
-    // Index: "[" (string | int) "]"
-    let index_string = select! {
+/// Parser for index expression: "[" (string | int) "]"
+fn index_parser<'a>() -> impl ChumskyParser<Token<'a>, IndexExpr, Error = ParserError<'a>> + Clone {
+    let string_index = select! {
         Token::StringLiteral(s) => {
             let inner = &s[1..s.len()-1];
             IndexExpr::String(inner.replace("\\\"", "\"").replace("\\\\", "\\"))
         }
     };
 
-    let index_int = select! {
+    let int_index = select! {
         Token::IntLiteral(s) => {
             let val: i64 = s.parse().unwrap_or(0);
             IndexExpr::Int(val)
         }
     };
 
-    let index = index_string
-        .or(index_int)
-        .delimited_by(just(Token::LBracket), just(Token::RBracket));
+    string_index
+        .or(int_index)
+        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+}
 
-    // Path: lower_ident ("." ident_segment)* index*
-    let path = lower_ident
-        .clone()
-        .then(
-            just(Token::Dot)
-                .ignore_then(ident_segment.clone())
-                .repeated(),
-        )
-        .then(index.clone().repeated())
+/// Parser for path expression: lower_ident ("." ident)* index*
+fn path_parser<'a>() -> impl ChumskyParser<Token<'a>, PathExpr, Error = ParserError<'a>> + Clone {
+    lower_ident_parser()
+        .then(just(Token::Dot).ignore_then(ident_parser()).repeated())
+        .then(index_parser().repeated())
         .map(|((first, rest), indexes)| {
             let mut segments = vec![first];
             segments.extend(rest);
             PathExpr { segments, indexes }
-        });
+        })
+}
 
-    // Clone enums_map entries for use in parser
-    let enums_clone: std::collections::HashMap<String, i64> = enums_map.clone();
-
-    // Enum: uppercase identifier that's in the enum map (resolved to int)
-    let enum_parser = upper_ident.clone().try_map(move |name, span| {
-        if let Some(&val) = enums_clone.get(&name) {
+/// Parser for enum values (uppercase identifier resolved from enum map)
+fn enum_parser<'a>(
+    enums: std::collections::HashMap<String, i64>,
+) -> impl ChumskyParser<Token<'a>, ValueExpr, Error = ParserError<'a>> + Clone {
+    upper_ident_parser().try_map(move |name, span| {
+        if let Some(&val) = enums.get(&name) {
             Ok(ValueExpr::Literal(Value::Int(val)))
         } else {
-            // Not an enum, this will be handled by converter parser
             Err(Simple::custom(span, format!("Unknown enum: {}", name)))
         }
-    });
+    })
+}
 
-    // Clone the Arc references for the callbacks
-    let editors_clone: std::collections::HashMap<String, CallbackFn> = editors_map.clone();
-    let converters_clone: std::collections::HashMap<String, CallbackFn> = converters_map.clone();
+/// Parser for comparison operators
+fn comp_op_parser<'a>() -> impl ChumskyParser<Token<'a>, CompOp, Error = ParserError<'a>> + Clone {
+    choice((
+        just(Token::Eq).to(CompOp::Eq),
+        just(Token::NotEq).to(CompOp::NotEq),
+        just(Token::LessEq).to(CompOp::LessEq),
+        just(Token::GreaterEq).to(CompOp::GreaterEq),
+        just(Token::Less).to(CompOp::Less),
+        just(Token::Greater).to(CompOp::Greater),
+    ))
+}
 
-    // Clone path for use in bool_expr later
-    let path_for_bool = path.clone();
+/// Parser for additive operators (+ -)
+fn add_op_parser<'a>() -> impl ChumskyParser<Token<'a>, MathOp, Error = ParserError<'a>> + Clone {
+    choice((
+        just(Token::Plus).to(MathOp::Add),
+        just(Token::Minus).to(MathOp::Sub),
+    ))
+}
 
-    // Create the value expression parser using recursive
-    let value_expr = recursive(move |value_expr| {
+/// Parser for multiplicative operators (* /)
+fn mul_op_parser<'a>() -> impl ChumskyParser<Token<'a>, MathOp, Error = ParserError<'a>> + Clone {
+    choice((
+        just(Token::Star).to(MathOp::Mul),
+        just(Token::Slash).to(MathOp::Div),
+    ))
+}
+
+/// Parser for unary sign operators (returns true for +, false for -)
+fn unary_sign_parser<'a>() -> impl ChumskyParser<Token<'a>, bool, Error = ParserError<'a>> + Clone {
+    choice((just(Token::Plus).to(true), just(Token::Minus).to(false)))
+}
+
+/// Parser for numeric literal as MathExpr::Primary
+fn math_numeric_literal_parser<'a>(
+) -> impl ChumskyParser<Token<'a>, MathExpr, Error = ParserError<'a>> + Clone {
+    choice((
+        select! {
+            Token::FloatLiteral(s) => {
+                let val: f64 = s.parse().unwrap_or(0.0);
+                MathExpr::Primary(ValueExpr::Literal(Value::Float(val)))
+            }
+        },
+        select! {
+            Token::IntLiteral(s) => {
+                let val: i64 = s.parse().unwrap_or(0);
+                MathExpr::Primary(ValueExpr::Literal(Value::Int(val)))
+            }
+        },
+    ))
+}
+
+// =====================================================================================================================
+// Chumsky Parser Builder - Main Entry Point
+// =====================================================================================================================
+
+/// Build the chumsky parser for OTTL
+fn build_parser<'a>(
+    editors_map: &'a mut CallbackMap,
+    converters_map: &'a mut CallbackMap,
+    enums_map: &'a mut EnumMap,
+) -> impl ChumskyParser<Token<'a>, RootExpr, Error = ParserError<'a>> + 'a {
+    // Clone maps for use in closures
+    let enums_clone = enums_map.clone();
+    let editors_clone = editors_map.clone();
+    let converters_clone = converters_map.clone();
+
+    // Create value expression parser (recursive)
+    let value_expr = build_value_expr_parser(enums_clone.clone(), converters_clone.clone());
+
+    // Create math expression parser for comparisons
+    let math_expr_for_comparison = build_math_expr_parser(value_expr.clone());
+
+    // Create boolean expression parser
+    let bool_expr = build_bool_expr_parser(value_expr.clone(), math_expr_for_comparison);
+
+    // Create math expression parser for root
+    let math_expr = build_math_expr_parser(value_expr.clone());
+
+    // Create editor statement parser
+    let editor_statement =
+        build_editor_statement_parser(value_expr, editors_clone, bool_expr.clone());
+
+    // Root: editor_statement | boolean_expression | math_expression
+    choice((
+        editor_statement,
+        bool_expr.map(RootExpr::BooleanExpression),
+        math_expr.map(RootExpr::MathExpression),
+    ))
+    .then_ignore(end())
+}
+
+/// Build the value expression parser (handles recursion for lists, maps, and function calls)
+fn build_value_expr_parser<'a>(
+    enums: std::collections::HashMap<String, i64>,
+    converters: std::collections::HashMap<String, CallbackFn>,
+) -> impl ChumskyParser<Token<'a>, ValueExpr, Error = ParserError<'a>> + Clone + 'a {
+    recursive(move |value_expr| {
         // List: "[" (value ("," value)*)? "]"
         let list = value_expr
             .clone()
@@ -423,34 +543,24 @@ fn build_parser<'a>(
             .delimited_by(just(Token::LBrace), just(Token::RBrace))
             .map(ValueExpr::Map);
 
-        // Named argument: lower_ident "=" value
-        let named_arg = lower_ident
-            .clone()
+        // Arguments for function calls
+        let named_arg = lower_ident_parser()
             .then_ignore(just(Token::Assign))
             .then(value_expr.clone())
             .map(|(name, value)| ArgExpr::Named { name, value });
 
-        // Positional argument
         let positional_arg = value_expr.clone().map(ArgExpr::Positional);
 
-        // Argument: named or positional (try named first)
         let arg = named_arg.or(positional_arg);
-
-        // Argument list
         let arg_list = arg.separated_by(just(Token::Comma)).allow_trailing();
 
         // Converter invocation: upper_ident "(" arg_list ")" index*
-        let converter_call = upper_ident
-            .clone()
-            .then(
-                arg_list
-                    .clone()
-                    .delimited_by(just(Token::LParen), just(Token::RParen)),
-            )
-            .then(index.clone().repeated())
-            .map({
-                let converters = converters_clone.clone();
-                move |((name, args), indexes)| {
+        let converter_call = {
+            let converters = converters.clone();
+            upper_ident_parser()
+                .then(arg_list.delimited_by(just(Token::LParen), just(Token::RParen)))
+                .then(index_parser().repeated())
+                .map(move |((name, args), indexes)| {
                     let callback = converters.get(&name).cloned();
                     ValueExpr::FunctionCall(Box::new(FunctionCall {
                         name,
@@ -459,308 +569,181 @@ fn build_parser<'a>(
                         indexes,
                         callback,
                     }))
-                }
-            });
+                })
+        };
 
         // Value expression: converter_call | list | map | enum | path | literal
         choice((
             converter_call,
             list,
             map,
-            enum_parser.clone(),
-            path.clone().map(ValueExpr::Path),
-            literal.clone(),
+            enum_parser(enums.clone()),
+            path_parser().map(ValueExpr::Path),
+            literal_parser(),
         ))
-    });
+    })
+}
 
-    // Editor invocation: lower_ident "(" arg_list ")"
-    let editor_call = {
-        // We need to create arg parsers again for editor_call since value_expr consumed the closures
-        let named_arg_for_editor = lower_ident
+/// Build the math expression parser with proper operator precedence
+fn build_math_expr_parser<'a>(
+    value_expr: impl ChumskyParser<Token<'a>, ValueExpr, Error = ParserError<'a>> + Clone + 'a,
+) -> impl ChumskyParser<Token<'a>, MathExpr, Error = ParserError<'a>> + Clone + 'a {
+    recursive(move |math_expr| {
+        // Parenthesized math expression
+        let paren_math = math_expr
             .clone()
-            .then_ignore(just(Token::Assign))
-            .then(value_expr.clone())
-            .map(|(name, value)| ArgExpr::Named { name, value });
+            .delimited_by(just(Token::LParen), just(Token::RParen));
 
-        let positional_arg_for_editor = value_expr.clone().map(ArgExpr::Positional);
-
-        let arg_for_editor = named_arg_for_editor.or(positional_arg_for_editor);
-        let arg_list_for_editor = arg_for_editor
-            .separated_by(just(Token::Comma))
-            .allow_trailing();
-
-        lower_ident
-            .clone()
-            .then(arg_list_for_editor.delimited_by(just(Token::LParen), just(Token::RParen)))
-            .map({
-                let editors = editors_clone.clone();
-                move |(name, args)| FunctionCall {
-                    callback: editors.get(&name).cloned(),
-                    name,
-                    is_editor: true,
-                    args,
-                    indexes: Vec::new(),
-                }
-            })
-    };
-
-    // Comparison operators
-    let comp_op = choice((
-        just(Token::Eq).to(CompOp::Eq),
-        just(Token::NotEq).to(CompOp::NotEq),
-        just(Token::LessEq).to(CompOp::LessEq),
-        just(Token::GreaterEq).to(CompOp::GreaterEq),
-        just(Token::Less).to(CompOp::Less),
-        just(Token::Greater).to(CompOp::Greater),
-    ));
-
-    // Math expression parser for use in comparisons
-    // This is defined here so it can be used in bool_expr
-    let math_expr_for_comparison =
-        recursive({
-            let value_expr = value_expr.clone();
-            move |math_expr| {
-                // Simple numeric literal for math
-                let math_literal = choice((
-                    select! {
-                        Token::FloatLiteral(s) => {
-                            let val: f64 = s.parse().unwrap_or(0.0);
-                            MathExpr::Primary(ValueExpr::Literal(Value::Float(val)))
-                        }
-                    },
-                    select! {
-                        Token::IntLiteral(s) => {
-                            let val: i64 = s.parse().unwrap_or(0);
-                            MathExpr::Primary(ValueExpr::Literal(Value::Int(val)))
-                        }
-                    },
-                ));
-
-                let paren_math = math_expr
-                    .clone()
-                    .delimited_by(just(Token::LParen), just(Token::RParen));
-
-                // Converter call or path produces MathExpr::Primary
-                let math_value = value_expr.clone().try_map(|v, span| {
-                    if let ValueExpr::FunctionCall(_) = &v {
-                        Ok(MathExpr::Primary(v))
-                    } else if let ValueExpr::Path(_) = &v {
-                        Ok(MathExpr::Primary(v))
-                    } else {
-                        Err(Simple::custom(span, "Expected converter or path"))
-                    }
-                });
-
-                let primary = choice((paren_math, math_literal, math_value));
-
-                // MATH_FACTOR = [("+" | "-")] MATH_PRIMARY
-                let unary_op = choice((just(Token::Plus).to(true), just(Token::Minus).to(false)));
-
-                let factor = unary_op.or_not().then(primary).map(|(op, expr)| match op {
-                    Some(false) => MathExpr::Negate(Box::new(expr)),
-                    _ => expr,
-                });
-
-                // MATH_TERM = MATH_FACTOR (("*" | "/") MATH_FACTOR)*
-                let mul_op = choice((
-                    just(Token::Star).to(MathOp::Mul),
-                    just(Token::Slash).to(MathOp::Div),
-                ));
-
-                let term = factor.clone().then(mul_op.then(factor).repeated()).foldl(
-                    |left, (op, right)| MathExpr::Binary {
-                        left: Box::new(left),
-                        op,
-                        right: Box::new(right),
-                    },
-                );
-
-                // MATH_EXPRESSION = MATH_TERM (("+" | "-") MATH_TERM)*
-                let add_op = choice((
-                    just(Token::Plus).to(MathOp::Add),
-                    just(Token::Minus).to(MathOp::Sub),
-                ));
-
-                term.clone()
-                    .then(add_op.then(term).repeated())
-                    .foldl(|left, (op, right)| MathExpr::Binary {
-                        left: Box::new(left),
-                        op,
-                        right: Box::new(right),
-                    })
+        // Value that can be used in math (converter or path)
+        let math_value = value_expr.clone().try_map(|v, span| {
+            if let ValueExpr::FunctionCall(_) = &v {
+                Ok(MathExpr::Primary(v))
+            } else if let ValueExpr::Path(_) = &v {
+                Ok(MathExpr::Primary(v))
+            } else {
+                Err(Simple::custom(span, "Expected converter or path"))
             }
         });
 
-    // Convert MathExpr to ValueExpr for use in comparisons
-    let comparison_value = math_expr_for_comparison
-        .clone()
-        .map(|m| ValueExpr::Math(Box::new(m)));
+        // Primary: parenthesized | numeric literal | converter/path
+        let primary = choice((paren_math, math_numeric_literal_parser(), math_value));
 
-    // Boolean expression parser with proper precedence
-    let bool_expr = recursive({
-        let value_expr = value_expr.clone();
-        let comparison_value = comparison_value.clone();
-        let path = path_for_bool.clone();
-        move |bool_expr| {
-            // BOOLEAN_VALUE = BOOL_LITERAL | CONVERTER_INVOCATION | COMPARISON | PATH
-            let bool_literal_expr = select! {
-                Token::True => BoolExpr::Literal(true),
-                Token::False => BoolExpr::Literal(false),
-            };
+        // Factor with optional unary sign: [("+" | "-")] primary
+        let factor = unary_sign_parser()
+            .or_not()
+            .then(primary)
+            .map(|(op, expr)| match op {
+                Some(false) => MathExpr::Negate(Box::new(expr)),
+                _ => expr,
+            });
 
-            // Comparison: value comp_op value (values can be math expressions)
-            let comparison = comparison_value
+        // Term: factor (("*" | "/") factor)*
+        let term = factor
+            .clone()
+            .then(mul_op_parser().then(factor).repeated())
+            .foldl(|left, (op, right)| MathExpr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            });
+
+        // Expression: term (("+" | "-") term)*
+        term.clone()
+            .then(add_op_parser().then(term).repeated())
+            .foldl(|left, (op, right)| MathExpr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            })
+    })
+}
+
+/// Build the boolean expression parser with proper operator precedence
+fn build_bool_expr_parser<'a>(
+    value_expr: impl ChumskyParser<Token<'a>, ValueExpr, Error = ParserError<'a>> + Clone + 'a,
+    math_expr: impl ChumskyParser<Token<'a>, MathExpr, Error = ParserError<'a>> + Clone + 'a,
+) -> impl ChumskyParser<Token<'a>, BoolExpr, Error = ParserError<'a>> + Clone + 'a {
+    // Convert math expression to value expression for comparisons
+    let comparison_value = math_expr.map(|m| ValueExpr::Math(Box::new(m)));
+
+    recursive(move |bool_expr| {
+        // Boolean literals
+        let bool_literal = select! {
+            Token::True => BoolExpr::Literal(true),
+            Token::False => BoolExpr::Literal(false),
+        };
+
+        // Comparison: value comp_op value
+        let comparison = comparison_value
+            .clone()
+            .then(comp_op_parser())
+            .then(comparison_value.clone())
+            .map(|((left, op), right)| BoolExpr::Comparison { left, op, right });
+
+        // Converter call in boolean context
+        let bool_converter = value_expr.clone().try_map(|v, span| {
+            if let ValueExpr::FunctionCall(fc) = v {
+                Ok(BoolExpr::Converter(fc))
+            } else {
+                Err(Simple::custom(span, "Expected converter call"))
+            }
+        });
+
+        // Path that evaluates to boolean
+        let bool_path = path_parser().map(BoolExpr::Path);
+
+        // Primary: parenthesized | comparison | literal | converter | path
+        let bool_primary = choice((
+            bool_expr
                 .clone()
-                .then(comp_op.clone())
-                .then(comparison_value.clone())
-                .map(|((left, op), right)| BoolExpr::Comparison { left, op, right });
+                .delimited_by(just(Token::LParen), just(Token::RParen)),
+            comparison,
+            bool_literal,
+            bool_converter,
+            bool_path,
+        ));
 
-            // Converter call in boolean context - we need to extract FunctionCall
-            let bool_converter = value_expr.clone().try_map(|v, span| {
-                if let ValueExpr::FunctionCall(fc) = v {
-                    Ok(BoolExpr::Converter(fc))
+        // Factor with optional NOT: ["not"] primary
+        let bool_factor = just(Token::Not)
+            .or_not()
+            .then(bool_primary)
+            .map(|(not, expr)| {
+                if not.is_some() {
+                    BoolExpr::Not(Box::new(expr))
                 } else {
-                    Err(Simple::custom(span, "Expected converter call"))
+                    expr
                 }
             });
 
-            // Path that evaluates to boolean
-            let bool_path = path.clone().map(BoolExpr::Path);
+        // Term: factor ("and" factor)*
+        let bool_term = bool_factor
+            .clone()
+            .then(just(Token::And).ignore_then(bool_factor).repeated())
+            .foldl(|left, right| BoolExpr::And(Box::new(left), Box::new(right)));
 
-            // BOOLEAN_PRIMARY = "(" BOOLEAN_EXPRESSION ")" | COMPARISON | BOOL_LITERAL | CONVERTER | PATH
-            // Note: comparison should come before bool_path to avoid path consuming input meant for comparison
-            let bool_primary = choice((
-                bool_expr
-                    .clone()
-                    .delimited_by(just(Token::LParen), just(Token::RParen)),
-                comparison,
-                bool_literal_expr,
-                bool_converter,
-                bool_path,
-            ));
+        // Expression: term ("or" term)*
+        bool_term
+            .clone()
+            .then(just(Token::Or).ignore_then(bool_term).repeated())
+            .foldl(|left, right| BoolExpr::Or(Box::new(left), Box::new(right)))
+    })
+}
 
-            // BOOLEAN_FACTOR = ["not"] BOOLEAN_PRIMARY
-            let bool_factor = just(Token::Not)
-                .or_not()
-                .then(bool_primary)
-                .map(|(not, expr)| {
-                    if not.is_some() {
-                        BoolExpr::Not(Box::new(expr))
-                    } else {
-                        expr
-                    }
-                });
+/// Build the editor statement parser
+fn build_editor_statement_parser<'a>(
+    value_expr: impl ChumskyParser<Token<'a>, ValueExpr, Error = ParserError<'a>> + Clone + 'a,
+    editors: std::collections::HashMap<String, CallbackFn>,
+    bool_expr: impl ChumskyParser<Token<'a>, BoolExpr, Error = ParserError<'a>> + Clone + 'a,
+) -> impl ChumskyParser<Token<'a>, RootExpr, Error = ParserError<'a>> + 'a {
+    // Arguments for editor calls
+    let named_arg = lower_ident_parser()
+        .then_ignore(just(Token::Assign))
+        .then(value_expr.clone())
+        .map(|(name, value)| ArgExpr::Named { name, value });
 
-            // BOOLEAN_TERM = BOOLEAN_FACTOR ("and" BOOLEAN_FACTOR)*
-            let bool_term = bool_factor
-                .clone()
-                .then(just(Token::And).ignore_then(bool_factor).repeated())
-                .foldl(|left, right| BoolExpr::And(Box::new(left), Box::new(right)));
+    let positional_arg = value_expr.map(ArgExpr::Positional);
 
-            // BOOLEAN_EXPRESSION = BOOLEAN_TERM ("or" BOOLEAN_TERM)*
-            bool_term
-                .clone()
-                .then(just(Token::Or).ignore_then(bool_term).repeated())
-                .foldl(|left, right| BoolExpr::Or(Box::new(left), Box::new(right)))
-        }
-    });
+    let arg = named_arg.or(positional_arg);
+    let arg_list = arg.separated_by(just(Token::Comma)).allow_trailing();
 
-    // Math expression parser with proper precedence
-    // MATH_PRIMARY = LITERAL | PATH | CONVERTER_INVOCATION | "(" MATH_EXPRESSION ")"
-    let math_expr =
-        recursive({
-            let value_expr = value_expr.clone();
-            move |math_expr| {
-                // Simple numeric literal for math
-                let math_literal = choice((
-                    select! {
-                        Token::FloatLiteral(s) => {
-                            let val: f64 = s.parse().unwrap_or(0.0);
-                            MathExpr::Primary(ValueExpr::Literal(Value::Float(val)))
-                        }
-                    },
-                    select! {
-                        Token::IntLiteral(s) => {
-                            let val: i64 = s.parse().unwrap_or(0);
-                            MathExpr::Primary(ValueExpr::Literal(Value::Int(val)))
-                        }
-                    },
-                ));
-
-                let paren_math = math_expr
-                    .clone()
-                    .delimited_by(just(Token::LParen), just(Token::RParen));
-
-                // Converter call produces MathExpr::Primary
-                let math_converter = value_expr.clone().try_map(|v, span| {
-                    if let ValueExpr::FunctionCall(_) = &v {
-                        Ok(MathExpr::Primary(v))
-                    } else if let ValueExpr::Path(_) = &v {
-                        Ok(MathExpr::Primary(v))
-                    } else {
-                        Err(Simple::custom(span, "Expected converter or path"))
-                    }
-                });
-
-                let primary = choice((paren_math, math_literal, math_converter));
-
-                // MATH_FACTOR = [("+" | "-")] MATH_PRIMARY
-                let unary_op = choice((just(Token::Plus).to(true), just(Token::Minus).to(false)));
-
-                let factor = unary_op.or_not().then(primary).map(|(op, expr)| match op {
-                    Some(false) => MathExpr::Negate(Box::new(expr)),
-                    _ => expr,
-                });
-
-                // MATH_TERM = MATH_FACTOR (("*" | "/") MATH_FACTOR)*
-                let mul_op = choice((
-                    just(Token::Star).to(MathOp::Mul),
-                    just(Token::Slash).to(MathOp::Div),
-                ));
-
-                let term = factor.clone().then(mul_op.then(factor).repeated()).foldl(
-                    |left, (op, right)| MathExpr::Binary {
-                        left: Box::new(left),
-                        op,
-                        right: Box::new(right),
-                    },
-                );
-
-                // MATH_EXPRESSION = MATH_TERM (("+" | "-") MATH_TERM)*
-                let add_op = choice((
-                    just(Token::Plus).to(MathOp::Add),
-                    just(Token::Minus).to(MathOp::Sub),
-                ));
-
-                term.clone()
-                    .then(add_op.then(term).repeated())
-                    .foldl(|left, (op, right)| MathExpr::Binary {
-                        left: Box::new(left),
-                        op,
-                        right: Box::new(right),
-                    })
-            }
+    // Editor call: lower_ident "(" arg_list ")"
+    let editor_call = lower_ident_parser()
+        .then(arg_list.delimited_by(just(Token::LParen), just(Token::RParen)))
+        .map(move |(name, args)| FunctionCall {
+            callback: editors.get(&name).cloned(),
+            name,
+            is_editor: true,
+            args,
+            indexes: Vec::new(),
         });
 
-    // WHERE clause: "where" boolean_expression
-    let where_clause = just(Token::Where).ignore_then(bool_expr.clone());
+    // WHERE clause: "where" bool_expr
+    let where_clause = just(Token::Where).ignore_then(bool_expr);
 
     // Editor statement: editor_call [where_clause]
-    let editor_statement = editor_call
+    editor_call
         .then(where_clause.or_not())
-        .map(|(editor, condition)| {
-            RootExpr::EditorStatement(EditorStatement { editor, condition })
-        });
-
-    // Root: editor_statement | boolean_expression | math_expression
-    // Note: bool_expr must come before math_expr because a path like "my.bool.value"
-    // can be parsed as either, but only bool_expr handles "... or ..." correctly
-    choice((
-        editor_statement,
-        bool_expr.map(RootExpr::BooleanExpression),
-        math_expr.map(RootExpr::MathExpression),
-    ))
-    .then_ignore(end())
+        .map(|(editor, condition)| RootExpr::EditorStatement(EditorStatement { editor, condition }))
 }
 
 // =====================================================================================================================

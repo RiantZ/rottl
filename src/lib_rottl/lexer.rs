@@ -122,18 +122,18 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str) -> Self {
-        Self {
-            _lexer: Token::lexer(input),
-        }
-    }
+    //pub fn new(input: &'a str) -> Self {
+    //    Self {
+    //        _lexer: Token::lexer(input),
+    //    }
+    //}
 
     /// Collect all tokens into a vector
-    pub fn collect_tokens(input: &'a str) -> Vec<Token<'a>> {
-        Token::lexer(input)
-            .filter_map(|result| result.ok())
-            .collect()
-    }
+    //pub fn collect_tokens(input: &'a str) -> Vec<Token<'a>> {
+    //    Token::lexer(input)
+    //        .filter_map(|result| result.ok())
+    //        .collect()
+    //}
 
     /// Collect tokens with their positions (spans)
     pub fn collect_with_spans(input: &'a str) -> Vec<(Token<'a>, std::ops::Range<usize>)> {

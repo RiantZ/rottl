@@ -324,20 +324,10 @@ fn test_whitespace_handling() {
 }
 
 // ============================================================================
-// Library function tests
-// ============================================================================
-
-#[test]
-fn test_get() {
-    let result = crate::get("hello");
-    assert_eq!(result, "Received: hello");
-}
-
-// ============================================================================
 // Parser tests
 // ============================================================================
 
-use crate::parser::{Argument, Value};
+use crate::{Argument, Value};
 
 #[test]
 fn test_value_equality() {

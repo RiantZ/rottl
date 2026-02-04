@@ -1,6 +1,9 @@
 //! Tests for the OTTL lexer and library
 
 use crate::lexer::{Lexer, Token};
+use crate::parser::Parser;
+use crate::{CallbackMap, EnumMap, EvalContext, OttlParser, PathAccessor, PathResolver, Value};
+use std::sync::Arc;
 
 // ============================================================================
 // Lexer tests
@@ -82,28 +85,50 @@ fn test_string_with_escape() {
 
 #[test]
 fn test_int_literal() {
-    let tokens = Lexer::collect_tokens("42 -10 +5 0");
+    // Note: Signs are now separate tokens, handled by the parser
+    let tokens = Lexer::collect_tokens("42 0");
+    assert_eq!(
+        tokens,
+        vec![Token::IntLiteral("42"), Token::IntLiteral("0"),]
+    );
+}
+
+#[test]
+fn test_signed_int_literal() {
+    // Signs are separate tokens
+    let tokens = Lexer::collect_tokens("-10 +5");
     assert_eq!(
         tokens,
         vec![
-            Token::IntLiteral("42"),
-            Token::IntLiteral("-10"),
-            Token::IntLiteral("+5"),
-            Token::IntLiteral("0"),
+            Token::Minus,
+            Token::IntLiteral("10"),
+            Token::Plus,
+            Token::IntLiteral("5"),
         ]
     );
 }
 
 #[test]
 fn test_float_literal() {
-    let tokens = Lexer::collect_tokens("3.14 .5 -2.0 +0.1");
+    // Note: Signs are now separate tokens, handled by the parser
+    let tokens = Lexer::collect_tokens("3.14 .5");
+    assert_eq!(
+        tokens,
+        vec![Token::FloatLiteral("3.14"), Token::FloatLiteral(".5"),]
+    );
+}
+
+#[test]
+fn test_signed_float_literal() {
+    // Signs are separate tokens
+    let tokens = Lexer::collect_tokens("-2.0 +0.1");
     assert_eq!(
         tokens,
         vec![
-            Token::FloatLiteral("3.14"),
-            Token::FloatLiteral(".5"),
-            Token::FloatLiteral("-2.0"),
-            Token::FloatLiteral("+0.1"),
+            Token::Minus,
+            Token::FloatLiteral("2.0"),
+            Token::Plus,
+            Token::FloatLiteral("0.1"),
         ]
     );
 }
@@ -327,7 +352,7 @@ fn test_whitespace_handling() {
 // Parser tests
 // ============================================================================
 
-use crate::{Argument, Value};
+use crate::Argument;
 
 #[test]
 fn test_value_equality() {
@@ -354,4 +379,91 @@ fn test_argument_access() {
     };
     assert_eq!(named.name(), Some("foo"));
     assert_eq!(*named.value(), Value::String("bar".into()));
+}
+
+// ============================================================================
+// Parser integration tests
+// ============================================================================
+
+/// Stub PathAccessor that does nothing (for testing purposes)
+#[derive(Debug)]
+struct StubPathAccessor;
+
+impl PathAccessor for StubPathAccessor {
+    fn get(&self, _ctx: &EvalContext, _path: &String) -> crate::Result<&Value> {
+        Err("StubPathAccessor: get not implemented".into())
+    }
+
+    fn set(&self, _ctx: &mut EvalContext, _path: &String, _value: &Value) -> crate::Result<()> {
+        Err("StubPathAccessor: set not implemented".into())
+    }
+}
+
+/// Create a stub PathResolver that returns StubPathAccessor for any path
+fn stub_path_resolver() -> PathResolver {
+    Arc::new(
+        |_path: &str| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
+            Ok(Arc::new(StubPathAccessor))
+        },
+    )
+}
+
+/// Create a stub EvalContext
+fn stub_context() -> EvalContext {
+    Box::new(())
+}
+
+#[test]
+fn test_parser_math_expression() {
+    let mut editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+    let mut enums = EnumMap::new();
+    let mut resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(
+        &mut editors,
+        &mut converters,
+        &mut enums,
+        &mut resolver,
+        "1+2*10",
+    );
+
+    // Check no parsing errors
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    // Execute and check result
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Int(21));
+}
+
+#[test]
+fn test_parser_bool_expression_with_math() {
+    let mut editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+    let mut enums = EnumMap::new();
+    let mut resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(
+        &mut editors,
+        &mut converters,
+        &mut enums,
+        &mut resolver,
+        "false or (2 < (1 + 2))",
+    );
+
+    // Check no parsing errors
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    // Execute and check result
+    // false or (2 < 3) = false or true = true
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Bool(true));
 }

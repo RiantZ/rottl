@@ -1,7 +1,7 @@
 use logos::Logos;
 
 /// OTTL language tokens
-#[derive(Logos, Debug, PartialEq, Clone)]
+#[derive(Logos, Debug, PartialEq, Eq, Clone, Hash)]
 #[logos(skip r"[ \t]+")] // Skip spaces and tabs
 pub enum Token<'a> {
     // ===== Keywords =====
@@ -98,12 +98,12 @@ pub enum Token<'a> {
     #[regex(r"0x[0-9a-fA-F]+", |lex| lex.slice())]
     BytesLiteral(&'a str),
 
-    /// Float literal: 3.14, .5, -2.0
-    #[regex(r"[+-]?([0-9]+\.[0-9]*|\.[0-9]+)", |lex| lex.slice())]
+    /// Float literal: 3.14, .5
+    #[regex(r"[0-9]+\.[0-9]*|\.[0-9]+", |lex| lex.slice())]
     FloatLiteral(&'a str),
 
-    /// Integer literal: 42, -10, +5
-    #[regex(r"[+-]?[0-9]+", priority = 2, callback = |lex| lex.slice())]
+    /// Integer literal: 42, 10, 5
+    #[regex(r"[0-9]+", priority = 2, callback = |lex| lex.slice())]
     IntLiteral(&'a str),
 
     // ===== Identifiers =====

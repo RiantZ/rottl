@@ -22,14 +22,13 @@ use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
-pub mod lexer;
+pub(crate) mod lexer;
 mod parser;
 
 #[cfg(test)]
 mod tests;
 
 // Re-export from submodules
-pub use lexer::{Lexer, Token};
 pub use parser::Parser;
 
 // =====================================================================================================================
@@ -64,9 +63,9 @@ pub enum Value {
     /// 64-bit floating point
     Float(f64),
     /// String value
-    /// AZH: TODO: condier to use Arc for reference counting in case of clonning and not making full copy with going to heap, locks, etc.
+    /// AZH: TODO: consider to use Arc for reference counting in case of cloning and not making full copy with going to heap, locks, etc.
     String(String),
-    /// Bytes literal (e.g., 0xDEADBEEF)
+    /// Bytes literal (e.g., 0xC0FFEE)
     Bytes(Vec<u8>),
     /// Nil/null value
     #[default] // set nil default for all below!!! ;)
@@ -102,11 +101,11 @@ pub enum Argument {
 /// let pos_arg = Argument::Positional(Value::Int(42));
 /// let named_arg = Argument::Named { name: String::from("count"), value: Value::Int(10) };
 ///
-/// Both return the inner value
+/// // Both return the inner value
 /// assert_eq!(pos_arg.value(), &Value::Int(42));
 /// assert_eq!(named_arg.value(), &Value::Int(10));
 ///
-/// Only named arguments have a name
+/// // Only named arguments have a name
 /// assert_eq!(pos_arg.name(), None);
 /// assert_eq!(named_arg.name(), Some("count"));
 /// ```

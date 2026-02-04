@@ -94,7 +94,7 @@ pub enum Token<'a> {
     #[regex(r#""[^"\\]*(?:\\.[^"\\]*)*""#, |lex| lex.slice())]
     StringLiteral(&'a str),
 
-    /// Bytes literal: 0xDEADBEEF
+    /// Bytes literal: 0xC0FFEE
     #[regex(r"0x[0-9a-fA-F]+", |lex| lex.slice())]
     BytesLiteral(&'a str),
 

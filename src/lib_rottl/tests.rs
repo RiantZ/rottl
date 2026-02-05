@@ -1160,3 +1160,96 @@ fn test_editor_set_list_of_maps() {
         "Second argument should be the list of maps with computed values"
     );
 }
+
+// ============================================================================
+// Path Expressions Tests
+// ============================================================================
+
+/// PathAccessor that supports multi-level paths, index access, and key access
+#[derive(Debug)]
+struct PathExprAccessor {
+    // resource.attributes.status = 200
+    // resource.count = 10
+    resource_status: Value,
+    resource_count: Value,
+    // items[0] = 5, items[1] = 3
+    items: Value,
+    // data["key"] = 100, data["multiplier"] = 2
+    data: Value,
+}
+
+impl PathAccessor for PathExprAccessor {
+    fn get(&self, _ctx: &EvalContext, path: &str) -> crate::Result<&Value> {
+        match path {
+            "resource.attributes.status" => Ok(&self.resource_status),
+            "resource.count" => Ok(&self.resource_count),
+            "items" => Ok(&self.items),
+            "data" => Ok(&self.data),
+            _ => Err(format!("Unknown path: {}", path).into()),
+        }
+    }
+
+    fn set(&self, _ctx: &mut EvalContext, _path: &str, _value: &Value) -> crate::Result<()> {
+        Err("PathExprAccessor: set not implemented".into())
+    }
+}
+
+#[test]
+fn test_parser_path_expressions_comprehensive() {
+    // This test verifies all path expression types in one boolean expression:
+    // - Multi-level paths: resource.attributes.status
+    // - Index access by number: items[0], items[1]
+    // - Index access by key: data["key"]
+    // - Math expressions with paths: items[0] + items[1]
+
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+
+    use std::collections::HashMap;
+
+    // Setup data map: {"key": 100, "multiplier": 2}
+    let mut data_map = HashMap::new();
+    data_map.insert("key".to_string(), Value::Int(100));
+    data_map.insert("multiplier".to_string(), Value::Int(2));
+
+    let accessor = Arc::new(PathExprAccessor {
+        resource_status: Value::Int(200),
+        resource_count: Value::Int(10),
+        items: Value::List(vec![Value::Int(5), Value::Int(3)]),
+        data: Value::Map(data_map),
+    });
+    let accessor_clone = accessor.clone();
+
+    let resolver: PathResolver = Arc::new(
+        move |_path: &str| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
+            Ok(accessor_clone.clone())
+        },
+    );
+
+    let mut ctx = stub_context();
+
+    // Combined expression testing all path types:
+    // (resource.attributes.status == 200) and (items[0] + items[1] == 8) and (data["key"] == 100)
+    // - resource.attributes.status = 200 → true
+    // - items[0] + items[1] = 5 + 3 = 8 → true
+    // - data["key"] = 100 → true
+    // Result: true and true and true = true
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "(resource.attributes.status == 200) and (items[0] + items[1] == 8) and (data[\"key\"] == 100)",
+    );
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        Value::Bool(true),
+        "Combined path expression should be true"
+    );
+}

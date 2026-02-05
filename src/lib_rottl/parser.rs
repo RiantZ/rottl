@@ -720,15 +720,19 @@ fn build_parser<'a>(
         });
 
     // Root expression
-    // Order matters: try math_expr_with_ops first (for "Sum(1,2) + 3"),
-    // then editor_statement, then bool_expr, finally simple math_expr
+    // Each alternative includes end() to ensure full input is consumed.
+    // This enables backtracking: if math_expr_with_ops parses "a + b" but
+    // "== c" remains, end() fails and bool_expr is tried instead.
     choice((
-        editor_statement,
-        math_expr_with_ops.map(RootExpr::MathExpression),
-        bool_expr.map(RootExpr::BooleanExpression),
-        math_expr.map(RootExpr::MathExpression),
+        editor_statement.then_ignore(end()),
+        math_expr_with_ops
+            .map(RootExpr::MathExpression)
+            .then_ignore(end()),
+        bool_expr
+            .map(RootExpr::BooleanExpression)
+            .then_ignore(end()),
+        math_expr.map(RootExpr::MathExpression).then_ignore(end()),
     ))
-    .then_ignore(end())
 }
 
 // =====================================================================================================================

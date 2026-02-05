@@ -864,7 +864,7 @@ impl PathAccessor for TrackingPathAccessor {
         match path {
             "my.int.value" => Ok(&self.int_value),
             "status_code" => Ok(&self.status_code),
-            "target" => Ok(&self.target_path), // For editor's first argument
+            "target" | "x" => Ok(&self.target_path), // For editor's first argument
             _ => Err(format!("Unknown path: {}", path).into()),
         }
     }
@@ -1066,5 +1066,97 @@ fn test_editor_not_executed_when_condition_false() {
     assert!(
         capture.second_arg.is_none(),
         "No arguments should be captured"
+    );
+}
+
+#[test]
+fn test_editor_set_list_of_maps() {
+    // Test: set(x, [{"id": 1, "value": Double(5.0)}, {"id": 2, "value": STATUS_OK}, {"id": 3, "value": my.int.value}])
+    // Expected result: x = [{"id": 1, "value": 10.0}, {"id": 2, "value": 200}, {"id": 3, "value": 73}]
+
+    let call_capture = Arc::new(Mutex::new(EditorCallCapture::default()));
+    let capture_clone = call_capture.clone();
+
+    let mut editors = CallbackMap::new();
+    editors.insert(
+        "set".to_string(),
+        Arc::new(move |_ctx: &mut EvalContext, args: Vec<Argument>| {
+            let mut capture = capture_clone.lock().unwrap();
+            capture.called = true;
+            capture.first_arg = args.get(0).map(|a| a.value().clone());
+            capture.second_arg = args.get(1).map(|a| a.value().clone());
+            Ok(Value::Nil)
+        }),
+    );
+
+    let mut converters = CallbackMap::new();
+    // Double converter: Double(x) -> x * 2
+    converters.insert(
+        "Double".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+            match args.get(0).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => Ok(Value::Int(v * 2)),
+                Some(Value::Float(v)) => Ok(Value::Float(v * 2.0)),
+                _ => Err("Double: argument must be numeric".into()),
+            }
+        }),
+    );
+
+    let mut enums = EnumMap::new();
+    enums.insert("STATUS_OK".to_string(), 200);
+
+    // my.int.value = 73
+    let (resolver, _accessor) = tracking_path_resolver(73, 200);
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "set(x, [{\"id\": 1, \"value\": Double(5.0)}, {\"id\": 2, \"value\": STATUS_OK}, {\"id\": 3, \"value\": my.int.value}])",
+    );
+
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Nil);
+
+    // Verify editor was called
+    let capture = call_capture.lock().unwrap();
+    assert!(capture.called, "Editor 'set' should have been called");
+
+    // Verify first argument (path "x" resolves to Nil in our mock)
+    assert_eq!(
+        capture.first_arg,
+        Some(Value::Nil),
+        "First argument should be the resolved path value"
+    );
+
+    // Verify second argument - list of maps with computed values
+    // Expected: [{"id": 1, "value": 10.0}, {"id": 2, "value": 200}, {"id": 3, "value": 73}]
+    use std::collections::HashMap;
+
+    let mut map1 = HashMap::new();
+    map1.insert("id".to_string(), Value::Int(1));
+    map1.insert("value".to_string(), Value::Float(10.0));
+
+    let mut map2 = HashMap::new();
+    map2.insert("id".to_string(), Value::Int(2));
+    map2.insert("value".to_string(), Value::Int(200));
+
+    let mut map3 = HashMap::new();
+    map3.insert("id".to_string(), Value::Int(3));
+    map3.insert("value".to_string(), Value::Int(73));
+
+    let expected_list = Value::List(vec![Value::Map(map1), Value::Map(map2), Value::Map(map3)]);
+
+    assert_eq!(
+        capture.second_arg,
+        Some(expected_list),
+        "Second argument should be the list of maps with computed values"
     );
 }

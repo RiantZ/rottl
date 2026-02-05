@@ -181,10 +181,10 @@ pub struct Parser {
 impl Parser {
     /// Creates a new parser with the given configuration.
     pub fn new(
-        editors_map: &mut CallbackMap,
-        converters_map: &mut CallbackMap,
-        enums_map: &mut EnumMap,
-        path_resolver_cb: &mut PathResolver,
+        editors_map: &CallbackMap,
+        converters_map: &CallbackMap,
+        enums_map: &EnumMap,
+        path_resolver_cb: &PathResolver,
         expression: &str,
     ) -> Self {
         let mut parser = Parser {
@@ -498,14 +498,11 @@ fn make_math_expr<'a>(
 
 /// Build the chumsky parser for OTTL (chumsky 0.12 API)
 fn build_parser<'a>(
-    editors_map: &'a mut CallbackMap,
-    converters_map: &'a mut CallbackMap,
-    enums_map: &'a mut EnumMap,
+    editors_map: &'a CallbackMap,
+    converters_map: &'a CallbackMap,
+    enums_map: &'a EnumMap,
 ) -> impl chumsky::Parser<'a, TokenInput<'a>, RootExpr, ParserExtra<'a>> + 'a {
-    // Clone maps for use in closures
-    let enums_clone = enums_map.clone();
-    let editors_clone = editors_map.clone();
-    let converters_clone = converters_map.clone();
+    // References are Copy, so they can be captured in move closures without cloning
 
     // Use extracted parsers
     let literal = literal_parser();
@@ -517,9 +514,8 @@ fn build_parser<'a>(
 
     // Enum: uppercase identifier that's in the enum map
     let enum_parser = {
-        let enums = enums_clone.clone();
         upper_ident.clone().try_map(move |name, span| {
-            if let Some(&val) = enums.get(&name) {
+            if let Some(&val) = enums_map.get(&name) {
                 Ok(ValueExpr::Literal(Value::Int(val)))
             } else {
                 Err(Rich::custom(span, format!("Unknown enum: {}", name)))
@@ -564,13 +560,12 @@ fn build_parser<'a>(
 
         // Converter invocation: upper_ident "(" arg_list ")" index*
         let converter_call = {
-            let converters = converters_clone.clone();
             upper_ident
                 .clone()
                 .then(arg_list.delimited_by(just(&Token::LParen), just(&Token::RParen)))
                 .then(index.clone().repeated().collect::<Vec<_>>())
                 .map(move |((name, args), indexes)| {
-                    let callback = converters.get(&name).cloned();
+                    let callback = converters_map.get(&name).cloned();
                     ValueExpr::FunctionCall(Box::new(FunctionCall {
                         name,
                         is_editor: false,
@@ -593,14 +588,13 @@ fn build_parser<'a>(
 
     // Editor call using extracted arg_list_parser
     let editor_call = {
-        let editors = editors_clone.clone();
         let arg_list = arg_list_parser(value_expr.clone());
 
         lower_ident
             .clone()
             .then(arg_list.delimited_by(just(&Token::LParen), just(&Token::RParen)))
             .map(move |(name, args)| FunctionCall {
-                callback: editors.get(&name).cloned(),
+                callback: editors_map.get(&name).cloned(),
                 name,
                 is_editor: true,
                 args,

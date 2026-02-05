@@ -111,10 +111,10 @@ fn test_signed_int_literal() {
 #[test]
 fn test_float_literal() {
     // Note: Signs are now separate tokens, handled by the parser
-    let tokens = Lexer::collect_tokens("3.14 .5");
+    let tokens = Lexer::collect_tokens("6.18 .5");
     assert_eq!(
         tokens,
-        vec![Token::FloatLiteral("3.14"), Token::FloatLiteral(".5"),]
+        vec![Token::FloatLiteral("6.18"), Token::FloatLiteral(".5"),]
     );
 }
 
@@ -358,7 +358,7 @@ use crate::Argument;
 fn test_value_equality() {
     assert_eq!(Value::Bool(true), Value::Bool(true));
     assert_eq!(Value::Int(42), Value::Int(42));
-    assert_eq!(Value::Float(3.14), Value::Float(3.14));
+    assert_eq!(Value::Float(6.18), Value::Float(6.18));
     assert_eq!(Value::String("hello".into()), Value::String("hello".into()));
     assert_eq!(Value::Nil, Value::Nil);
 
@@ -390,11 +390,11 @@ fn test_argument_access() {
 struct StubPathAccessor;
 
 impl PathAccessor for StubPathAccessor {
-    fn get(&self, _ctx: &EvalContext, _path: &String) -> crate::Result<&Value> {
+    fn get(&self, _ctx: &EvalContext, _path: &str) -> crate::Result<&Value> {
         Err("StubPathAccessor: get not implemented".into())
     }
 
-    fn set(&self, _ctx: &mut EvalContext, _path: &String, _value: &Value) -> crate::Result<()> {
+    fn set(&self, _ctx: &mut EvalContext, _path: &str, _value: &Value) -> crate::Result<()> {
         Err("StubPathAccessor: set not implemented".into())
     }
 }
@@ -415,17 +415,17 @@ fn stub_context() -> EvalContext {
 
 #[test]
 fn test_parser_math_expression() {
-    let mut editors = CallbackMap::new();
-    let mut converters = CallbackMap::new();
-    let mut enums = EnumMap::new();
-    let mut resolver = stub_path_resolver();
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
     let mut ctx = stub_context();
 
     let parser = Parser::new(
-        &mut editors,
-        &mut converters,
-        &mut enums,
-        &mut resolver,
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
         "-1+   2*10 - 10/5 - (1+3*2)",
     );
 
@@ -476,15 +476,15 @@ struct MockPathAccessor {
 }
 
 impl PathAccessor for MockPathAccessor {
-    fn get(&self, _ctx: &EvalContext, path: &String) -> crate::Result<&Value> {
-        match path.as_str() {
+    fn get(&self, _ctx: &EvalContext, path: &str) -> crate::Result<&Value> {
+        match path {
             "my.bool.value" => Ok(&self.bool_value),
             "my.int.value" => Ok(&self.int_value),
             _ => Err(format!("Unknown path: {}", path).into()),
         }
     }
 
-    fn set(&self, _ctx: &mut EvalContext, _path: &String, _value: &Value) -> crate::Result<()> {
+    fn set(&self, _ctx: &mut EvalContext, _path: &str, _value: &Value) -> crate::Result<()> {
         Err("MockPathAccessor: set not implemented".into())
     }
 }

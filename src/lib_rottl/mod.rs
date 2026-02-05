@@ -8,12 +8,12 @@
 /// ```ignore
 /// use rottl::{Parser, OttlParser, CallbackMap, EnumMap, PathResolver};
 ///
-/// let mut editors = CallbackMap::new();
-/// let mut converters = CallbackMap::new();
-/// let mut enums = EnumMap::new();
-/// let mut resolver = ...;
+/// let editors = CallbackMap::new();
+/// let converters = CallbackMap::new();
+/// let enums = EnumMap::new();
+/// let resolver = ...;
 ///
-/// let parser = Parser::new(&mut editors, &mut converters, &mut enums, &mut resolver, "set(\"my.attr\", 1) where 1 > 0");
+/// let parser = Parser::new(&editors, &converters, &enums, &resolver, "set(\"my.attr\", 1) where 1 > 0");
 /// let result = parser.execute(&mut ctx);
 /// ```
 use std::any::Any;
@@ -134,10 +134,10 @@ impl Argument {
 /// Trait for accessing (reading and writing) path values in the context.
 pub trait PathAccessor: fmt::Debug {
     /// Get the value at this path from the context
-    fn get(&self, ctx: &EvalContext, path: &String) -> Result<&Value>;
+    fn get(&self, ctx: &EvalContext, path: &str) -> Result<&Value>;
 
     /// Set the value at this path in the context
-    fn set(&self, ctx: &mut EvalContext, path: &String, value: &Value) -> Result<()>;
+    fn set(&self, ctx: &mut EvalContext, path: &str, value: &Value) -> Result<()>;
 }
 
 /// Type alias for the path resolver function.

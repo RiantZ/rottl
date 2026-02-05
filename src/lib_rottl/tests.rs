@@ -453,7 +453,7 @@ fn test_parser_bool_expression_with_math() {
         &converters,
         &enums,
         &resolver,
-        "false or not (2 < (1 + 2)) or (0xDEADBEEF == nil) or (1 != 2) or (2 >= 1.5) and (true) and \"banana\" > \"apple\"",
+        "false or not (2 < (1 + 2)) or (0xDEADBEEF == nil) or (1 != 2) or (2 >= 1.5) and (true) and \"banana 🎉\" > \"apple\"",
     );
 
     // Check no parsing errors
@@ -715,7 +715,7 @@ fn test_parser_bool_expression_with_enums() {
         &converters,
         &enums,
         &resolver,
-        "(STATUS_OK < STATUS_NOT_FOUND) and (STATUS_ERROR > 400)",
+        "(((STATUS_OK < STATUS_NOT_FOUND))) and (STATUS_ERROR > 400)",
     );
 
     if let Err(e) = parser3.is_error() {
@@ -1114,7 +1114,7 @@ fn test_editor_set_list_of_maps() {
         &converters,
         &enums,
         &resolver,
-        "set(x, [{\"id\": 1, \"value\": Double(5.0)}, {\"id\": 2, \"value\": STATUS_OK}, {\"id\": 3, \"value\": my.int.value}])",
+        "set(x, [{\"id\": 1, \"value\": Double(5.0) ,}, {\"id\": 2, \"value\": STATUS_OK}, {\"id\": 3, \"value\": my.int.value}])",
     );
 
     if let Err(e) = parser.is_error() {
@@ -1251,5 +1251,128 @@ fn test_parser_path_expressions_comprehensive() {
         result.unwrap(),
         Value::Bool(true),
         "Combined path expression should be true"
+    );
+}
+
+// ============================================================================
+// Converter with Index Tests
+// ============================================================================
+
+#[test]
+fn test_converter_with_index() {
+    // Test: Split("a,b,c", ",")[0] should return "a"
+    let editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+    let enums = EnumMap::new();
+
+    // Split converter: splits string by delimiter, returns list
+    converters.insert(
+        "Split".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+            let text = match args.get(0).map(|arg| arg.value()) {
+                Some(Value::String(s)) => s.clone(),
+                _ => return Err("Split first argument must be string".into()),
+            };
+            let delimiter = match args.get(1).map(|arg| arg.value()) {
+                Some(Value::String(s)) => s.clone(),
+                _ => return Err("Split second argument must be string".into()),
+            };
+            let parts: Vec<Value> = text
+                .split(&delimiter)
+                .map(|s| Value::String(s.to_string()))
+                .collect();
+            Ok(Value::List(parts))
+        }),
+    );
+
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    // Split("a,b,c", ",")[0] == "a"
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "Split(\"a,b,c\", \",\")[0] == \"a\"",
+    );
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        Value::Bool(true),
+        "Split(\"a,b,c\", \",\")[0] should equal \"a\""
+    );
+}
+
+// ============================================================================
+// Named Arguments Tests
+// ============================================================================
+
+#[test]
+fn test_named_arguments() {
+    // Test: Convert(value=10, format="hex") with named arguments
+    let editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+    let enums = EnumMap::new();
+
+    // Convert converter: converts value based on format
+    // Uses named arguments: value and format
+    converters.insert(
+        "Convert".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+            // Find arguments by name
+            let value_arg = args
+                .iter()
+                .find(|a| a.name().as_deref() == Some("value"))
+                .or_else(|| args.get(0))
+                .ok_or("Convert requires value argument")?;
+            let format_arg = args
+                .iter()
+                .find(|a| a.name().as_deref() == Some("format"))
+                .or_else(|| args.get(1))
+                .ok_or("Convert requires format argument")?;
+
+            let value = match value_arg.value() {
+                Value::Int(n) => n,
+                _ => return Err("value must be integer".into()),
+            };
+            let format = match format_arg.value() {
+                Value::String(s) => s.clone(),
+                _ => return Err("format must be string".into()),
+            };
+
+            match format.as_str() {
+                "hex" => Ok(Value::String(format!("{:x}", value))),
+                "binary" => Ok(Value::String(format!("{:b}", value))),
+                "octal" => Ok(Value::String(format!("{:o}", value))),
+                _ => Ok(Value::String(value.to_string())),
+            }
+        }),
+    );
+
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    // Convert(value=10, format="hex") == "a"
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "Convert(value=10, format=\"hex\") == \"a\"",
+    );
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        Value::Bool(true),
+        "Convert(value=10, format=\"hex\") should equal \"a\""
     );
 }

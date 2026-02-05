@@ -116,12 +116,6 @@ cargo build --release	Оптимизированная сборка
 
 Анализ существующих тестов
 
-4. Path expressions
-Многоуровневые пути: a.b.c.d
-Индексный доступ: items[0], items["key"]
-Пути в математике: resource.count + 10
-
-
 6. Converter-ы (расширенные)
 Converter с индексом: Split("a,b,c", ",")[0]
 Именованные аргументы: Convert(value=10, format="hex")
@@ -134,20 +128,6 @@ Boolean converter: IsMatch(str, pattern) в условии
 Несоответствие типов: "string" + 1
 Деление на ноль: 10 / 0
 
-8. Edge cases
-Пустое выражение: ""
-Только пробелы: " "
-Глубокая вложенность: (((((1 + 2)))))
-Trailing comma: [1, 2, 3,]
-Unicode строки: "привет мир 🎉"
-
-9. Приоритет операторов
-1 + 2 * 3 → 7 (не 9)
-2 * 3 + 4 * 5 → 26
-true or false and false → true (and сначала)
-1 < 2 and 3 > 2 or false → правильный приоритет
-10. Комплексные сценарии
-Всё вместе: set(path, Sum(ENUM_A, items[0])) where status >= 200 and status < 300
 Приоритетные тесты (по важности):
 🔴 Editor statements — вообще не тестируются!
 🔴 Обработка ошибок — нет negative tests

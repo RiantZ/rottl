@@ -447,8 +447,11 @@ fn make_math_expr<'a>(
                 Ok(MathExpr::Primary(v))
             } else if let ValueExpr::Path(_) = &v {
                 Ok(MathExpr::Primary(v))
+            } else if let ValueExpr::Literal(_) = &v {
+                // Allow literals (including enums which are parsed as int literals)
+                Ok(MathExpr::Primary(v))
             } else {
-                Err(Rich::custom(span, "Expected converter or path"))
+                Err(Rich::custom(span, "Expected converter, path, or literal"))
             }
         });
 

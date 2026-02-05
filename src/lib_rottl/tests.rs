@@ -582,4 +582,246 @@ fn test_parser_math_with_converters() {
     let result = parser.execute(&mut ctx);
     assert!(result.is_ok(), "Execution should succeed: {:?}", result);
     assert_eq!(result.unwrap(), Value::Int(3));
+
+    // Test: Sum(1,2) * Sum(2,4) = 3 * 6 = 18
+    let parser2 = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "Sum(1,2) * Sum(2,4)",
+    );
+
+    if let Err(e) = parser2.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result2 = parser2.execute(&mut ctx);
+    assert!(result2.is_ok(), "Execution should succeed: {:?}", result2);
+    assert_eq!(result2.unwrap(), Value::Int(18));
+}
+
+#[test]
+fn test_parser_math_with_enums() {
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let mut enums = EnumMap::new();
+
+    // Register enum values
+    enums.insert("MY_INT_VALUE1".to_string(), 1);
+    enums.insert("MY_INT_VALUE200".to_string(), 200);
+    enums.insert("MY_INT_VALUE199".to_string(), 199);
+
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    // Expression: MY_INT_VALUE200 - (MY_INT_VALUE1 + MY_INT_VALUE199)
+    // 200 - (1 + 199) = 200 - 200 = 0
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "MY_INT_VALUE200 - (MY_INT_VALUE1 + MY_INT_VALUE199)",
+    );
+
+    // Check no parsing errors
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    // Execute and check result
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Int(0));
+
+    // Test with unary minus before enum
+    // Expression: -MY_INT_VALUE1 + MY_INT_VALUE200
+    // -1 + 200 = 199
+    let parser2 = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "-MY_INT_VALUE1 + MY_INT_VALUE200",
+    );
+
+    if let Err(e) = parser2.is_error() {
+        panic!("Parser error with unary minus: {}", e);
+    }
+
+    let result2 = parser2.execute(&mut ctx);
+    assert!(
+        result2.is_ok(),
+        "Execution with unary minus should succeed: {:?}",
+        result2
+    );
+    assert_eq!(result2.unwrap(), Value::Int(199));
+}
+
+#[test]
+fn test_parser_bool_expression_with_enums() {
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let mut enums = EnumMap::new();
+
+    // Register enum values
+    enums.insert("STATUS_OK".to_string(), 200);
+    enums.insert("STATUS_NOT_FOUND".to_string(), 404);
+    enums.insert("STATUS_ERROR".to_string(), 500);
+
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    // Test 1: STATUS_OK < STATUS_NOT_FOUND (200 < 404 = true)
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "STATUS_OK < STATUS_NOT_FOUND",
+    );
+
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Bool(true));
+
+    // Test 2: STATUS_ERROR == 500 (500 == 500 = true)
+    let parser2 = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "STATUS_ERROR == 500",
+    );
+
+    if let Err(e) = parser2.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result2 = parser2.execute(&mut ctx);
+    assert!(result2.is_ok(), "Execution should succeed: {:?}", result2);
+    assert_eq!(result2.unwrap(), Value::Bool(true));
+
+    // Test 3: Complex boolean with enums
+    // (STATUS_OK < STATUS_NOT_FOUND) and (STATUS_ERROR > 400)
+    // (200 < 404) and (500 > 400) = true and true = true
+    let parser3 = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "(STATUS_OK < STATUS_NOT_FOUND) and (STATUS_ERROR > 400)",
+    );
+
+    if let Err(e) = parser3.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result3 = parser3.execute(&mut ctx);
+    assert!(result3.is_ok(), "Execution should succeed: {:?}", result3);
+    assert_eq!(result3.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_parser_enums_as_function_args() {
+    let editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+    let mut enums = EnumMap::new();
+
+    // Register enum values
+    enums.insert("VALUE_10".to_string(), 10);
+    enums.insert("VALUE_20".to_string(), 20);
+    enums.insert("VALUE_5".to_string(), 5);
+
+    // Register Sum converter: Sum(a: int, b: int) -> int { a + b }
+    converters.insert(
+        "Sum".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+            let a = match args.get(0).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v,
+                _ => return Err("Sum: first argument must be int".into()),
+            };
+            let b = match args.get(1).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v,
+                _ => return Err("Sum: second argument must be int".into()),
+            };
+            Ok(Value::Int(a + b))
+        }),
+    );
+
+    // Register Multiply converter: Multiply(a: int, b: int) -> int { a * b }
+    converters.insert(
+        "Multiply".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+            let a = match args.get(0).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v,
+                _ => return Err("Multiply: first argument must be int".into()),
+            };
+            let b = match args.get(1).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v,
+                _ => return Err("Multiply: second argument must be int".into()),
+            };
+            Ok(Value::Int(a * b))
+        }),
+    );
+
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    // Test 1: Sum(VALUE_10, VALUE_20) + 0 = 10 + 20 + 0 = 30
+    // Note: We add "+ 0" to force parsing as math expression (not bool)
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "Sum(VALUE_10, VALUE_20) + 0",
+    );
+
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Int(30));
+
+    // Test 2: Multiply(VALUE_5, VALUE_10) * 1 = 5 * 10 * 1 = 50
+    let parser2 = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "Multiply(VALUE_5, VALUE_10) * 1",
+    );
+
+    if let Err(e) = parser2.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result2 = parser2.execute(&mut ctx);
+    assert!(result2.is_ok(), "Execution should succeed: {:?}", result2);
+    assert_eq!(result2.unwrap(), Value::Int(50));
+
+    // Test 3: Nested - Sum(Multiply(VALUE_5, VALUE_10), VALUE_20) + 0 = (5*10) + 20 + 0 = 70
+    let parser3 = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "Sum(Multiply(VALUE_5, VALUE_10), VALUE_20) + 0",
+    );
+
+    if let Err(e) = parser3.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result3 = parser3.execute(&mut ctx);
+    assert!(result3.is_ok(), "Execution should succeed: {:?}", result3);
+    assert_eq!(result3.unwrap(), Value::Int(70));
 }

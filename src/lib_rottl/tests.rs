@@ -442,17 +442,17 @@ fn test_parser_math_expression() {
 
 #[test]
 fn test_parser_bool_expression_with_math() {
-    let mut editors = CallbackMap::new();
-    let mut converters = CallbackMap::new();
-    let mut enums = EnumMap::new();
-    let mut resolver = stub_path_resolver();
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
     let mut ctx = stub_context();
 
     let parser = Parser::new(
-        &mut editors,
-        &mut converters,
-        &mut enums,
-        &mut resolver,
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
         "false or (2 < (1 + 2))",
     );
 
@@ -504,18 +504,18 @@ fn mock_path_resolver(bool_value: bool, int_value: i64) -> PathResolver {
 
 #[test]
 fn test_parser_bool_expression_with_paths() {
-    let mut editors = CallbackMap::new();
-    let mut converters = CallbackMap::new();
-    let mut enums = EnumMap::new();
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
     // Create resolver that returns false for my.bool.value and 2 for my.int.value
-    let mut resolver = mock_path_resolver(false, 2);
+    let resolver = mock_path_resolver(false, 2);
     let mut ctx = stub_context();
 
     let parser = Parser::new(
-        &mut editors,
-        &mut converters,
-        &mut enums,
-        &mut resolver,
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
         "my.bool.value or (my.int.value < (1 + 2))",
     );
 
@@ -537,9 +537,9 @@ fn test_parser_bool_expression_with_paths() {
 
 #[test]
 fn test_parser_math_with_converters() {
-    let mut editors = CallbackMap::new();
+    let editors = CallbackMap::new();
     let mut converters = CallbackMap::new();
-    let mut enums = EnumMap::new();
+    let enums = EnumMap::new();
 
     // Register Sum converter: Sum(a: int, b: int) -> int { a + b }
     converters.insert(
@@ -557,7 +557,7 @@ fn test_parser_math_with_converters() {
         }),
     );
 
-    let mut resolver = mock_path_resolver(false, 0);
+    let resolver = mock_path_resolver(false, 0);
     let mut ctx = stub_context();
 
     // Expression: Sum(1, 2) + 10 * Sum(-1, 1)
@@ -566,10 +566,10 @@ fn test_parser_math_with_converters() {
     // 10 * 0 = 0
     // 3 + 0 = 3
     let parser = Parser::new(
-        &mut editors,
-        &mut converters,
-        &mut enums,
-        &mut resolver,
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
         "Sum(1, 2) + 10 * Sum(-1, 1)",
     );
 

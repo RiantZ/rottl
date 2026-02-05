@@ -825,3 +825,246 @@ fn test_parser_enums_as_function_args() {
     assert!(result3.is_ok(), "Execution should succeed: {:?}", result3);
     assert_eq!(result3.unwrap(), Value::Int(70));
 }
+
+// ============================================================================
+// Editor Statement Tests
+// ============================================================================
+
+use std::sync::Mutex;
+
+/// Structure to capture editor call information
+#[derive(Debug, Clone)]
+struct EditorCallCapture {
+    called: bool,
+    first_arg: Option<Value>,
+    second_arg: Option<Value>,
+}
+
+impl Default for EditorCallCapture {
+    fn default() -> Self {
+        Self {
+            called: false,
+            first_arg: None,
+            second_arg: None,
+        }
+    }
+}
+
+/// PathAccessor that supports both get and set, with tracking
+#[derive(Debug)]
+struct TrackingPathAccessor {
+    int_value: Value,
+    status_code: Value,
+    target_path: Value, // Dummy value for "target" path
+    set_calls: Mutex<Vec<(String, Value)>>,
+}
+
+impl PathAccessor for TrackingPathAccessor {
+    fn get(&self, _ctx: &EvalContext, path: &str) -> crate::Result<&Value> {
+        match path {
+            "my.int.value" => Ok(&self.int_value),
+            "status_code" => Ok(&self.status_code),
+            "target" => Ok(&self.target_path), // For editor's first argument
+            _ => Err(format!("Unknown path: {}", path).into()),
+        }
+    }
+
+    fn set(&self, _ctx: &mut EvalContext, path: &str, value: &Value) -> crate::Result<()> {
+        self.set_calls
+            .lock()
+            .unwrap()
+            .push((path.to_string(), value.clone()));
+        Ok(())
+    }
+}
+
+/// Create a PathResolver with tracking accessor
+fn tracking_path_resolver(
+    int_value: i64,
+    status_code: i64,
+) -> (PathResolver, Arc<TrackingPathAccessor>) {
+    let accessor = Arc::new(TrackingPathAccessor {
+        int_value: Value::Int(int_value),
+        status_code: Value::Int(status_code),
+        target_path: Value::Nil, // Dummy value for target path
+        set_calls: Mutex::new(Vec::new()),
+    });
+    let accessor_clone = accessor.clone();
+    let resolver: PathResolver = Arc::new(
+        move |_path: &str| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
+            Ok(accessor_clone.clone())
+        },
+    );
+    (resolver, accessor)
+}
+
+#[test]
+fn test_editor_executes_when_condition_true() {
+    // Setup: condition will be TRUE
+    // my.int.value = 50 (> 0)
+    // status_code = 200 (== STATUS_OK)
+
+    let call_capture = Arc::new(Mutex::new(EditorCallCapture::default()));
+    let capture_clone = call_capture.clone();
+
+    let mut editors = CallbackMap::new();
+    editors.insert(
+        "set".to_string(),
+        Arc::new(move |_ctx: &mut EvalContext, args: Vec<Argument>| {
+            let mut capture = capture_clone.lock().unwrap();
+            capture.called = true;
+            capture.first_arg = args.get(0).map(|a| a.value().clone());
+            capture.second_arg = args.get(1).map(|a| a.value().clone());
+            Ok(Value::Nil)
+        }),
+    );
+
+    let mut converters = CallbackMap::new();
+    // Sum converter: Sum(a, b) -> a + b
+    converters.insert(
+        "Sum".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+            let a = match args.get(0).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v as f64,
+                Some(Value::Float(v)) => *v,
+                _ => return Err("Sum: first argument must be numeric".into()),
+            };
+            let b = match args.get(1).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v as f64,
+                Some(Value::Float(v)) => *v,
+                _ => return Err("Sum: second argument must be numeric".into()),
+            };
+            Ok(Value::Float(a + b))
+        }),
+    );
+
+    let mut enums = EnumMap::new();
+    enums.insert("STATUS_WEIGHT".to_string(), 100);
+    enums.insert("STATUS_OK".to_string(), 200);
+
+    // my.int.value = 50, status_code = 200 (matches STATUS_OK)
+    let (resolver, _accessor) = tracking_path_resolver(50, 200);
+    let mut ctx = stub_context();
+
+    // Expression:
+    // set(target, Sum(STATUS_WEIGHT, my.int.value) * 1.5) where my.int.value > 0 and status_code == STATUS_OK
+    // Sum(100, 50) * 1.5 = 150 * 1.5 = 225.0
+    // Condition: 50 > 0 (true) and 200 == 200 (true) -> true
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "set(target, Sum(STATUS_WEIGHT, my.int.value) * 1.5) where my.int.value > 0 and status_code == STATUS_OK",
+    );
+
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Nil); // Editor returns Nil
+
+    // Verify editor was called
+    let capture = call_capture.lock().unwrap();
+    assert!(capture.called, "Editor 'set' should have been called");
+
+    // Verify first argument (path "target" resolves to Nil in our mock)
+    assert_eq!(
+        capture.first_arg,
+        Some(Value::Nil),
+        "First argument should be the resolved path value (Nil)"
+    );
+
+    // Verify second argument (computed value = 225.0)
+    // Sum(STATUS_WEIGHT=100, my.int.value=50) * 1.5 = 150 * 1.5 = 225.0
+    assert_eq!(
+        capture.second_arg,
+        Some(Value::Float(225.0)),
+        "Second argument should be Sum(100, 50) * 1.5 = 225.0"
+    );
+}
+
+#[test]
+fn test_editor_not_executed_when_condition_false() {
+    // Setup: condition will be FALSE
+    // my.int.value = -10 (NOT > 0)
+    // status_code = 200 (== STATUS_OK, but first part is false)
+
+    let call_capture = Arc::new(Mutex::new(EditorCallCapture::default()));
+    let capture_clone = call_capture.clone();
+
+    let mut editors = CallbackMap::new();
+    editors.insert(
+        "set".to_string(),
+        Arc::new(move |_ctx: &mut EvalContext, args: Vec<Argument>| {
+            let mut capture = capture_clone.lock().unwrap();
+            capture.called = true;
+            capture.first_arg = args.get(0).map(|a| a.value().clone());
+            capture.second_arg = args.get(1).map(|a| a.value().clone());
+            Ok(Value::Nil)
+        }),
+    );
+
+    let mut converters = CallbackMap::new();
+    converters.insert(
+        "Sum".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+            let a = match args.get(0).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v as f64,
+                Some(Value::Float(v)) => *v,
+                _ => return Err("Sum: first argument must be numeric".into()),
+            };
+            let b = match args.get(1).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v as f64,
+                Some(Value::Float(v)) => *v,
+                _ => return Err("Sum: second argument must be numeric".into()),
+            };
+            Ok(Value::Float(a + b))
+        }),
+    );
+
+    let mut enums = EnumMap::new();
+    enums.insert("STATUS_WEIGHT".to_string(), 100);
+    enums.insert("STATUS_OK".to_string(), 200);
+
+    // my.int.value = -10 (negative!), status_code = 200
+    let (resolver, _accessor) = tracking_path_resolver(-10, 200);
+    let mut ctx = stub_context();
+
+    // Expression:
+    // set(target, Sum(STATUS_WEIGHT, my.int.value) * 1.5) where my.int.value > 0 and status_code == STATUS_OK
+    // Condition: -10 > 0 (FALSE) and 200 == 200 (true) -> false (short-circuit)
+    // Editor should NOT be called
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "set(target, Sum(STATUS_WEIGHT, my.int.value) * 1.5) where my.int.value > 0 and status_code == STATUS_OK",
+    );
+
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Nil); // Still returns Nil
+
+    // Verify editor was NOT called
+    let capture = call_capture.lock().unwrap();
+    assert!(
+        !capture.called,
+        "Editor 'set' should NOT have been called when condition is false"
+    );
+    assert!(
+        capture.first_arg.is_none(),
+        "No arguments should be captured"
+    );
+    assert!(
+        capture.second_arg.is_none(),
+        "No arguments should be captured"
+    );
+}

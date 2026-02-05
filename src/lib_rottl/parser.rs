@@ -399,23 +399,34 @@ fn comp_op_parser<'a>() -> impl chumsky::Parser<'a, TokenInput<'a>, CompOp, Pars
 }
 
 /// Parser for argument list (used by both value_expr and editor_call)
+/// Takes a value_expr parser that can handle math expressions
 fn arg_list_parser<'a>(
-    value_expr: impl chumsky::Parser<'a, TokenInput<'a>, ValueExpr, ParserExtra<'a>> + Clone + 'a,
+    arg_value: impl chumsky::Parser<'a, TokenInput<'a>, ValueExpr, ParserExtra<'a>> + Clone + 'a,
 ) -> impl chumsky::Parser<'a, TokenInput<'a>, Vec<ArgExpr>, ParserExtra<'a>> + Clone + 'a {
     let lower_ident = lower_ident_parser();
 
     let named_arg = lower_ident
         .then_ignore(just(&Token::Assign))
-        .then(value_expr.clone())
+        .then(arg_value.clone())
         .map(|(name, value)| ArgExpr::Named { name, value });
 
-    let positional_arg = value_expr.map(ArgExpr::Positional);
+    let positional_arg = arg_value.map(ArgExpr::Positional);
 
     named_arg
         .or(positional_arg)
         .separated_by(just(&Token::Comma))
         .allow_trailing()
         .collect::<Vec<_>>()
+}
+
+/// Wraps a MathExpr into ValueExpr, unwrapping simple Primary values
+fn math_to_value_expr(math: MathExpr) -> ValueExpr {
+    match math {
+        // If it's just a primary (no operators), unwrap to the original ValueExpr
+        MathExpr::Primary(v) => v,
+        // Otherwise wrap as Math
+        other => ValueExpr::Math(Box::new(other)),
+    }
 }
 
 /// Creates a math expression parser (shared logic for comparison and root contexts)
@@ -558,8 +569,11 @@ fn build_parser<'a>(
             .delimited_by(just(&Token::LBrace), just(&Token::RBrace))
             .map(ValueExpr::Map);
 
-        // Argument list using extracted parser
-        let arg_list = arg_list_parser(value_expr.clone());
+        // Create arg_value parser that supports math expressions in arguments
+        let arg_value = make_math_expr(value_expr.clone()).map(math_to_value_expr);
+
+        // Argument list using math-aware parser
+        let arg_list = arg_list_parser(arg_value);
 
         // Converter invocation: upper_ident "(" arg_list ")" index*
         let converter_call = {
@@ -589,9 +603,11 @@ fn build_parser<'a>(
         ))
     });
 
-    // Editor call using extracted arg_list_parser
+    // Editor call using math-aware arg_list_parser
     let editor_call = {
-        let arg_list = arg_list_parser(value_expr.clone());
+        // Create arg_value parser that supports math expressions in editor arguments
+        let arg_value = make_math_expr(value_expr.clone()).map(math_to_value_expr);
+        let arg_list = arg_list_parser(arg_value);
 
         lower_ident
             .clone()

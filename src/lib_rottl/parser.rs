@@ -260,6 +260,7 @@ type ParserExtra<'src> = extra::Err<Rich<'src, Token<'src>>>;
 // =====================================================================================================================
 
 /// Parser for literal values (string, int, float, bytes, bool, nil)
+/// Supports optional unary minus for numeric literals
 fn literal_parser<'a>(
 ) -> impl chumsky::Parser<'a, TokenInput<'a>, ValueExpr, ParserExtra<'a>> + Clone {
     let string_literal = select_ref! {
@@ -270,19 +271,27 @@ fn literal_parser<'a>(
         }
     };
 
-    let int_literal = select_ref! {
-        Token::IntLiteral(s) => {
-            let val: i64 = s.parse().unwrap_or(0);
+    // Signed int literal: optional minus followed by int
+    let int_literal = just(&Token::Minus)
+        .or_not()
+        .then(select_ref! {
+            Token::IntLiteral(s) => s.parse::<i64>().unwrap_or(0)
+        })
+        .map(|(neg, val)| {
+            let val = if neg.is_some() { -val } else { val };
             Value::Int(val)
-        }
-    };
+        });
 
-    let float_literal = select_ref! {
-        Token::FloatLiteral(s) => {
-            let val: f64 = s.parse().unwrap_or(0.0);
+    // Signed float literal: optional minus followed by float
+    let float_literal = just(&Token::Minus)
+        .or_not()
+        .then(select_ref! {
+            Token::FloatLiteral(s) => s.parse::<f64>().unwrap_or(0.0)
+        })
+        .map(|(neg, val)| {
+            let val = if neg.is_some() { -val } else { val };
             Value::Float(val)
-        }
-    };
+        });
 
     let bytes_literal = select_ref! {
         Token::BytesLiteral(s) => {
@@ -668,6 +677,23 @@ fn build_parser<'a>(
     // Math expression for root (reuses make_math_expr)
     let math_expr = make_math_expr(value_expr.clone());
 
+    // Math expression that requires at least one binary operation
+    // This ensures we try math_expr before bool_expr for expressions like "Sum(1,2) + 3"
+    let math_expr_with_ops = math_expr.clone().try_map(|m, span| {
+        // Only accept if it's a binary expression (has operators)
+        if let MathExpr::Binary { .. } = &m {
+            Ok(m)
+        } else if let MathExpr::Negate(_) = &m {
+            // Also accept unary negation
+            Ok(m)
+        } else {
+            Err(Rich::custom(
+                span,
+                "Expected math expression with operators",
+            ))
+        }
+    });
+
     // WHERE clause
     let where_clause = just(&Token::Where).ignore_then(bool_expr.clone());
 
@@ -679,8 +705,11 @@ fn build_parser<'a>(
         });
 
     // Root expression
+    // Order matters: try math_expr_with_ops first (for "Sum(1,2) + 3"),
+    // then editor_statement, then bool_expr, finally simple math_expr
     choice((
         editor_statement,
+        math_expr_with_ops.map(RootExpr::MathExpression),
         bool_expr.map(RootExpr::BooleanExpression),
         math_expr.map(RootExpr::MathExpression),
     ))

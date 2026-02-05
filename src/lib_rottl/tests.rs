@@ -534,3 +534,52 @@ fn test_parser_bool_expression_with_paths() {
     assert!(result.is_ok(), "Execution should succeed: {:?}", result);
     assert_eq!(result.unwrap(), Value::Bool(true));
 }
+
+#[test]
+fn test_parser_math_with_converters() {
+    let mut editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+    let mut enums = EnumMap::new();
+
+    // Register Sum converter: Sum(a: int, b: int) -> int { a + b }
+    converters.insert(
+        "Sum".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+            let a = match args.get(0).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v,
+                _ => return Err("Sum: first argument must be int".into()),
+            };
+            let b = match args.get(1).map(|arg| arg.value()) {
+                Some(Value::Int(v)) => *v,
+                _ => return Err("Sum: second argument must be int".into()),
+            };
+            Ok(Value::Int(a + b))
+        }),
+    );
+
+    let mut resolver = mock_path_resolver(false, 0);
+    let mut ctx = stub_context();
+
+    // Expression: Sum(1, 2) + 10 * Sum(-1, 1)
+    // Sum(1, 2) = 1 + 2 = 3
+    // Sum(-1, 1) = -1 + 1 = 0
+    // 10 * 0 = 0
+    // 3 + 0 = 3
+    let parser = Parser::new(
+        &mut editors,
+        &mut converters,
+        &mut enums,
+        &mut resolver,
+        "Sum(1, 2) + 10 * Sum(-1, 1)",
+    );
+
+    // Check no parsing errors
+    if let Err(e) = parser.is_error() {
+        panic!("Parser error: {}", e);
+    }
+
+    // Execute and check result
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_ok(), "Execution should succeed: {:?}", result);
+    assert_eq!(result.unwrap(), Value::Int(3));
+}

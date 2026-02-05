@@ -454,15 +454,17 @@ fn make_math_expr<'a>(
             .delimited_by(just(&Token::LParen), just(&Token::RParen));
 
         let math_value = value_expr.clone().try_map(|v, span| {
-            if let ValueExpr::FunctionCall(_) = &v {
-                Ok(MathExpr::Primary(v))
-            } else if let ValueExpr::Path(_) = &v {
-                Ok(MathExpr::Primary(v))
-            } else if let ValueExpr::Literal(_) = &v {
-                // Allow literals (including enums which are parsed as int literals)
-                Ok(MathExpr::Primary(v))
-            } else {
-                Err(Rich::custom(span, "Expected converter, path, or literal"))
+            match &v {
+                ValueExpr::FunctionCall(_) => Ok(MathExpr::Primary(v)),
+                ValueExpr::Path(_) => Ok(MathExpr::Primary(v)),
+                ValueExpr::Literal(_) => Ok(MathExpr::Primary(v)),
+                // Allow lists and maps for comparison operations (==, !=)
+                ValueExpr::List(_) => Ok(MathExpr::Primary(v)),
+                ValueExpr::Map(_) => Ok(MathExpr::Primary(v)),
+                _ => Err(Rich::custom(
+                    span,
+                    "Expected converter, path, literal, list, or map",
+                )),
             }
         });
 
@@ -869,12 +871,38 @@ fn evaluate_comparison(left: &Value, op: &CompOp, right: &Value) -> Result<bool>
             CompOp::NotEq => true,
             _ => return Err("Nil comparison only supports == and !=".into()),
         }),
-        _ => Err(format!(
-            "Cannot compare {:?} with {:?}",
-            std::mem::discriminant(left),
-            std::mem::discriminant(right)
-        )
-        .into()),
+        // Bytes comparison (only == and !=)
+        (Value::Bytes(l), Value::Bytes(r)) => Ok(match op {
+            CompOp::Eq => l == r,
+            CompOp::NotEq => l != r,
+            _ => return Err("Bytes comparison only supports == and !=".into()),
+        }),
+        // List comparison (only == and !=)
+        (Value::List(l), Value::List(r)) => Ok(match op {
+            CompOp::Eq => l == r,
+            CompOp::NotEq => l != r,
+            _ => return Err("List comparison only supports == and !=".into()),
+        }),
+        // Map comparison (only == and !=)
+        (Value::Map(l), Value::Map(r)) => Ok(match op {
+            CompOp::Eq => l == r,
+            CompOp::NotEq => l != r,
+            _ => return Err("Map comparison only supports == and !=".into()),
+        }),
+        // Different types: only == and != are valid (always false/true respectively)
+        _ => Ok(match op {
+            CompOp::Eq => false,
+            CompOp::NotEq => true,
+            _ => {
+                return Err(format!(
+                    "Cannot compare different types with {:?}: left={:?}, right={:?}",
+                    op,
+                    std::mem::discriminant(left),
+                    std::mem::discriminant(right)
+                )
+                .into())
+            }
+        }),
     }
 }
 

@@ -453,7 +453,7 @@ fn test_parser_bool_expression_with_math() {
         &converters,
         &enums,
         &resolver,
-        "false or (2 < (1 + 2))",
+        "false or not (2 < (1 + 2)) or (0xDEADBEEF == nil) or (1 != 2) or (2 >= 1.5) and (true) and \"banana\" > \"apple\"",
     );
 
     // Check no parsing errors

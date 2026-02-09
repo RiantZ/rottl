@@ -47,7 +47,7 @@ fn test_arithmetic_operators() {
     let tokens = Lexer::collect_tokens("+ - * /");
     assert_eq!(
         tokens,
-        vec![Token::Plus, Token::Minus, Token::Star, Token::Slash,]
+        vec![Token::Plus, Token::Minus, Token::Multiply, Token::Divide,]
     );
 }
 
@@ -235,7 +235,7 @@ fn test_math_expression() {
             Token::IntLiteral("10"),
             Token::Plus,
             Token::IntLiteral("20"),
-            Token::Star,
+            Token::Multiply,
             Token::IntLiteral("3"),
         ]
     );
@@ -1375,4 +1375,620 @@ fn test_named_arguments() {
         Value::Bool(true),
         "Convert(value=10, format=\"hex\") should equal \"a\""
     );
+}
+
+// ============================================================================
+// Error Handling Tests - Lexer Errors
+// ============================================================================
+
+#[test]
+fn test_lexer_error_invalid_char() {
+    // The @ character is not a valid token
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "1 + @ + 2");
+
+    // Should have lexer error due to invalid token @
+    let err = parser.is_error();
+    assert!(
+        err.is_err(),
+        "Parser should report error for invalid character @"
+    );
+    assert!(
+        err.unwrap_err().to_string().contains("@"),
+        "Error message should mention the invalid character"
+    );
+}
+
+#[test]
+fn test_lexer_error_only_invalid_chars() {
+    // Expression with ONLY invalid characters
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    // Only invalid chars - no valid tokens at all
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "@#$%^&");
+
+    // Should fail because of invalid character
+    let err = parser.is_error();
+    assert!(err.is_err(), "Parser should fail for invalid characters");
+    assert!(
+        err.unwrap_err().to_string().contains("@"),
+        "Error should mention first invalid character @"
+    );
+}
+
+#[test]
+fn test_lexer_error_unclosed_string() {
+    // Unclosed string literal
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, r#""hello"#);
+
+    // Should have error due to unclosed string
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for unclosed string"
+    );
+}
+
+#[test]
+fn test_lexer_error_invalid_bytes_hex() {
+    // Invalid hex characters in bytes literal (GG is not valid hex)
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    // Note: logos may or may not accept this - depends on regex
+    // 0xGG won't be recognized as BytesLiteral, will be parsed differently
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "0xGG == 0x00");
+
+    // Should have parsing error
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for invalid hex 0xGG"
+    );
+}
+
+#[test]
+fn test_lexer_error_single_quotes() {
+    // Single quotes are not supported (only double quotes)
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "'single quote'");
+
+    // Should have error - single quotes not recognized
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for single-quoted strings"
+    );
+}
+
+// ============================================================================
+// Error Handling Tests - Parser Errors (Structure)
+// ============================================================================
+
+#[test]
+fn test_parser_error_missing_operand() {
+    // Missing right operand
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "1 + ");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for missing operand"
+    );
+}
+
+#[test]
+fn test_parser_error_double_operator() {
+    // Two operators in a row (not unary)
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "1 * / 2");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for double operators"
+    );
+}
+
+#[test]
+fn test_parser_error_unclosed_paren() {
+    // Missing closing parenthesis
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "(1 + 2");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for unclosed parenthesis"
+    );
+}
+
+#[test]
+fn test_parser_error_extra_closing_paren() {
+    // Extra closing parenthesis
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "1 + 2)");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for extra closing parenthesis"
+    );
+}
+
+#[test]
+fn test_parser_error_empty_parens() {
+    // Empty parentheses (not valid expression)
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "()");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for empty parentheses"
+    );
+}
+
+#[test]
+fn test_parser_error_missing_comma_in_function() {
+    // Missing comma between function arguments
+    let mut editors = CallbackMap::new();
+    editors.insert(
+        "func".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, _args: Vec<crate::Argument>| Ok(Value::Nil)),
+    );
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "func(1 2)");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for missing comma"
+    );
+}
+
+#[test]
+fn test_parser_error_unclosed_bracket() {
+    // Missing closing bracket in index
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "path[0");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for unclosed bracket"
+    );
+}
+
+#[test]
+fn test_parser_error_empty_expression() {
+    // Completely empty expression
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for empty expression"
+    );
+}
+
+#[test]
+fn test_parser_error_whitespace_only() {
+    // Only whitespace
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "   \t  ");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for whitespace-only expression"
+    );
+}
+
+// ============================================================================
+// Error Handling Tests - Syntax/Grammar Errors
+// ============================================================================
+
+#[test]
+fn test_syntax_error_double_comparison() {
+    // Two comparison operators in a row
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "1 < < 2");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for double comparison operators"
+    );
+}
+
+#[test]
+fn test_syntax_error_where_without_editor() {
+    // WHERE clause without editor statement
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "where true");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for WHERE without editor"
+    );
+}
+
+#[test]
+fn test_syntax_error_unknown_function() {
+    // Call to unknown/unregistered function (editor)
+    let editors = CallbackMap::new(); // Empty - no functions registered
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    // Parser may succeed, but execution should fail
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "unknownFunc()");
+
+    // This should either fail at parse time or execute time
+    if parser.is_error().is_ok() {
+        // If parsing succeeds, execution should fail
+        let result = parser.execute(&mut ctx);
+        assert!(result.is_err(), "Execute should fail for unknown function");
+    }
+    // If is_error() fails, that's also acceptable
+}
+
+#[test]
+fn test_syntax_error_unknown_converter() {
+    // Call to unknown/unregistered converter
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new(); // Empty
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "UnknownConverter() == 1",
+    );
+
+    if parser.is_error().is_ok() {
+        let result = parser.execute(&mut ctx);
+        assert!(result.is_err(), "Execute should fail for unknown converter");
+    }
+}
+
+#[test]
+fn test_syntax_error_unknown_enum() {
+    // Reference to unknown enum
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new(); // Empty - no enums registered
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "UNKNOWN_ENUM == 1",
+    );
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for unknown enum"
+    );
+}
+
+#[test]
+fn test_syntax_error_comparison_chain() {
+    // Chained comparisons like 1 < 2 < 3 (not supported)
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "1 < 2 < 3");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for comparison chain"
+    );
+}
+
+#[test]
+fn test_syntax_error_invalid_path_start() {
+    // Path starting with dot
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, ".invalid.path");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for path starting with dot"
+    );
+}
+
+#[test]
+fn test_syntax_error_double_dot_in_path() {
+    // Double dot in path
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "path..field");
+
+    assert!(
+        parser.is_error().is_err(),
+        "Parser should report error for double dot in path"
+    );
+}
+
+// ============================================================================
+// Error Handling Tests - Runtime Errors (during execute)
+// ============================================================================
+
+#[test]
+fn test_runtime_error_division_by_zero_int() {
+    // Integer division by zero
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "10 / 0");
+
+    assert!(parser.is_error().is_ok(), "Parsing should succeed");
+
+    let result = parser.execute(&mut ctx);
+    assert!(
+        result.is_err(),
+        "Execute should fail with division by zero error"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.to_lowercase().contains("division") || err_msg.to_lowercase().contains("zero"),
+        "Error should mention division by zero: {}",
+        err_msg
+    );
+}
+
+#[test]
+fn test_runtime_error_division_by_zero_float() {
+    // Float division by zero
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "10.0 / 0.0");
+
+    assert!(parser.is_error().is_ok(), "Parsing should succeed");
+
+    let result = parser.execute(&mut ctx);
+    assert!(
+        result.is_err(),
+        "Execute should fail with division by zero error"
+    );
+}
+
+#[test]
+fn test_runtime_error_path_not_found() {
+    // Reference to non-existent path
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+
+    // Create a resolver that always fails
+    let resolver: PathResolver =
+        Arc::new(|path: &str| Err(format!("Path not found: {}", path).into()));
+
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "nonexistent.path == 1",
+    );
+
+    // Parsing should succeed (path existence is checked at runtime)
+    if parser.is_error().is_ok() {
+        let result = parser.execute(&mut ctx);
+        assert!(result.is_err(), "Execute should fail for non-existent path");
+    }
+}
+
+#[test]
+fn test_runtime_error_index_out_of_bounds() {
+    // Index out of bounds on a list
+    let editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+
+    // Register a converter that returns a small list
+    converters.insert(
+        "GetList".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, _args: Vec<crate::Argument>| {
+            Ok(Value::List(vec![Value::Int(1), Value::Int(2)]))
+        }),
+    );
+
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        "GetList()[999] == 1",
+    );
+
+    assert!(parser.is_error().is_ok(), "Parsing should succeed");
+
+    let result = parser.execute(&mut ctx);
+    assert!(
+        result.is_err(),
+        "Execute should fail with index out of bounds"
+    );
+}
+
+#[test]
+fn test_runtime_error_negate_string() {
+    // Try to negate a string value
+    let editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+
+    // Register a converter that returns a string
+    converters.insert(
+        "GetString".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, _args: Vec<crate::Argument>| {
+            Ok(Value::String("hello".to_string()))
+        }),
+    );
+
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "-GetString()");
+
+    if parser.is_error().is_ok() {
+        let result = parser.execute(&mut ctx);
+        assert!(
+            result.is_err(),
+            "Execute should fail when negating a string"
+        );
+    }
+}
+
+#[test]
+fn test_runtime_error_type_mismatch_math() {
+    // Try to multiply string by integer
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    // Note: "hello" * 2 - this will fail during execution
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, r#""hello" * 2"#);
+
+    // This might fail at parse or execute time depending on grammar
+    if parser.is_error().is_ok() {
+        let result = parser.execute(&mut ctx);
+        assert!(result.is_err(), "Execute should fail for string * int");
+    }
+}
+
+#[test]
+fn test_runtime_error_key_not_found_in_map() {
+    // Access non-existent key in map
+    let editors = CallbackMap::new();
+    let mut converters = CallbackMap::new();
+
+    // Register a converter that returns a map
+    converters.insert(
+        "GetMap".to_string(),
+        Arc::new(|_ctx: &mut EvalContext, _args: Vec<crate::Argument>| {
+            let mut map = std::collections::HashMap::new();
+            map.insert("key1".to_string(), Value::Int(1));
+            Ok(Value::Map(map))
+        }),
+    );
+
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(
+        &editors,
+        &converters,
+        &enums,
+        &resolver,
+        r#"GetMap()["nonexistent"] == 1"#,
+    );
+
+    assert!(parser.is_error().is_ok(), "Parsing should succeed");
+
+    let result = parser.execute(&mut ctx);
+    assert!(result.is_err(), "Execute should fail for non-existent key");
+}
+
+#[test]
+fn test_runtime_error_bool_comparison_invalid_op() {
+    // Try to use < on booleans
+    let editors = CallbackMap::new();
+    let converters = CallbackMap::new();
+    let enums = EnumMap::new();
+    let resolver = stub_path_resolver();
+    let mut ctx = stub_context();
+
+    let parser = Parser::new(&editors, &converters, &enums, &resolver, "true < false");
+
+    if parser.is_error().is_ok() {
+        let result = parser.execute(&mut ctx);
+        assert!(
+            result.is_err(),
+            "Execute should fail for boolean less-than comparison"
+        );
+    }
 }

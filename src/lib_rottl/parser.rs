@@ -194,7 +194,13 @@ impl Parser {
         };
 
         // Tokenize the input
-        let tokens_with_spans = super::lexer::Lexer::collect_with_spans(expression);
+        let tokens_with_spans = match super::lexer::Lexer::collect_with_spans(expression) {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                parser.errors.push(format!("Lexer error: {}", e));
+                return parser;
+            }
+        };
 
         if tokens_with_spans.is_empty() && !expression.trim().is_empty() {
             parser.errors.push("Lexer failed to tokenize input".into());
@@ -478,8 +484,8 @@ fn make_math_expr<'a>(
         });
 
         let mul_op = choice((
-            just(&Token::Star).to(MathOp::Mul),
-            just(&Token::Slash).to(MathOp::Div),
+            just(&Token::Multiply).to(MathOp::Mul),
+            just(&Token::Divide).to(MathOp::Div),
         ));
 
         let term = factor

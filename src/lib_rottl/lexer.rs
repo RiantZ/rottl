@@ -53,10 +53,10 @@ pub enum Token<'a> {
     Minus,
 
     #[token("*")]
-    Star,
+    Multiply,
 
     #[token("/")]
-    Slash,
+    Divide,
 
     // ===== Delimiters =====
     #[token("(")]
@@ -116,19 +116,35 @@ pub enum Token<'a> {
     LowerIdent(&'a str),
 }
 
+/// Lexer error with position information
+#[derive(Debug, Clone)]
+pub struct LexerError {
+    /// Position in the input where the error occurred
+    pub position: usize,
+    /// The invalid character or slice that caused the error
+    pub invalid_slice: String,
+}
+
+impl std::fmt::Display for LexerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Invalid token '{}' at position {}",
+            self.invalid_slice, self.position
+        )
+    }
+}
+
+impl std::error::Error for LexerError {}
+
 /// Lexical analysis result
 pub struct Lexer<'a> {
     _lexer: logos::Lexer<'a, Token<'a>>,
 }
 
 impl<'a> Lexer<'a> {
-    //pub fn new(input: &'a str) -> Self {
-    //    Self {
-    //        _lexer: Token::lexer(input),
-    //    }
-    //}
-
     /// Collect all tokens into a vector
+    /// Note: This method skips invalid tokens for backward compatibility
     pub fn collect_tokens(input: &'a str) -> Vec<Token<'a>> {
         Token::lexer(input)
             .filter_map(|result| result.ok())
@@ -136,15 +152,26 @@ impl<'a> Lexer<'a> {
     }
 
     /// Collect tokens with their positions (spans)
-    pub fn collect_with_spans(input: &'a str) -> Vec<(Token<'a>, std::ops::Range<usize>)> {
+    /// Returns an error if any invalid token is encountered
+    pub fn collect_with_spans(
+        input: &'a str,
+    ) -> Result<Vec<(Token<'a>, std::ops::Range<usize>)>, LexerError> {
         let mut lexer = Token::lexer(input);
         let mut tokens = Vec::new();
         while let Some(result) = lexer.next() {
-            if let Ok(token) = result {
-                tokens.push((token, lexer.span()));
+            match result {
+                Ok(token) => tokens.push((token, lexer.span())),
+                Err(_) => {
+                    let span = lexer.span();
+                    let invalid_slice = input[span.clone()].to_string();
+                    return Err(LexerError {
+                        position: span.start,
+                        invalid_slice,
+                    });
+                }
             }
         }
-        tokens
+        Ok(tokens)
     }
 }
 

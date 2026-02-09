@@ -6,12 +6,25 @@ use crate::{CallbackMap, EnumMap, EvalContext, OttlParser, PathAccessor, PathRes
 use std::sync::Arc;
 
 // ============================================================================
+// Helper functions
+// ============================================================================
+
+/// Helper to collect tokens from input, panics on lexer error
+fn collect_tokens(input: &str) -> Vec<Token> {
+    Lexer::collect_with_spans(input)
+        .expect("Lexer error")
+        .into_iter()
+        .map(|(token, _span)| token)
+        .collect()
+}
+
+// ============================================================================
 // Lexer tests
 // ============================================================================
 
 #[test]
 fn test_keywords() {
-    let tokens = Lexer::collect_tokens("where or and not true false nil");
+    let tokens = collect_tokens("where or and not true false nil");
     assert_eq!(
         tokens,
         vec![
@@ -28,7 +41,7 @@ fn test_keywords() {
 
 #[test]
 fn test_comparison_operators() {
-    let tokens = Lexer::collect_tokens("== != < > <= >=");
+    let tokens = collect_tokens("== != < > <= >=");
     assert_eq!(
         tokens,
         vec![
@@ -44,7 +57,7 @@ fn test_comparison_operators() {
 
 #[test]
 fn test_arithmetic_operators() {
-    let tokens = Lexer::collect_tokens("+ - * /");
+    let tokens = collect_tokens("+ - * /");
     assert_eq!(
         tokens,
         vec![Token::Plus, Token::Minus, Token::Multiply, Token::Divide,]
@@ -53,7 +66,7 @@ fn test_arithmetic_operators() {
 
 #[test]
 fn test_delimiters() {
-    let tokens = Lexer::collect_tokens("( ) [ ] { } , . : =");
+    let tokens = collect_tokens("( ) [ ] { } , . : =");
     assert_eq!(
         tokens,
         vec![
@@ -73,20 +86,20 @@ fn test_delimiters() {
 
 #[test]
 fn test_string_literal() {
-    let tokens = Lexer::collect_tokens(r#""hello world""#);
+    let tokens = collect_tokens(r#""hello world""#);
     assert_eq!(tokens, vec![Token::StringLiteral(r#""hello world""#)]);
 }
 
 #[test]
 fn test_string_with_escape() {
-    let tokens = Lexer::collect_tokens(r#""hello \"world\"""#);
+    let tokens = collect_tokens(r#""hello \"world\"""#);
     assert_eq!(tokens, vec![Token::StringLiteral(r#""hello \"world\"""#)]);
 }
 
 #[test]
 fn test_int_literal() {
     // Note: Signs are now separate tokens, handled by the parser
-    let tokens = Lexer::collect_tokens("42 0");
+    let tokens = collect_tokens("42 0");
     assert_eq!(
         tokens,
         vec![Token::IntLiteral("42"), Token::IntLiteral("0"),]
@@ -96,7 +109,7 @@ fn test_int_literal() {
 #[test]
 fn test_signed_int_literal() {
     // Signs are separate tokens
-    let tokens = Lexer::collect_tokens("-10 +5");
+    let tokens = collect_tokens("-10 +5");
     assert_eq!(
         tokens,
         vec![
@@ -111,7 +124,7 @@ fn test_signed_int_literal() {
 #[test]
 fn test_float_literal() {
     // Note: Signs are now separate tokens, handled by the parser
-    let tokens = Lexer::collect_tokens("6.18 .5");
+    let tokens = collect_tokens("6.18 .5");
     assert_eq!(
         tokens,
         vec![Token::FloatLiteral("6.18"), Token::FloatLiteral(".5"),]
@@ -121,7 +134,7 @@ fn test_float_literal() {
 #[test]
 fn test_signed_float_literal() {
     // Signs are separate tokens
-    let tokens = Lexer::collect_tokens("-2.0 +0.1");
+    let tokens = collect_tokens("-2.0 +0.1");
     assert_eq!(
         tokens,
         vec![
@@ -135,7 +148,7 @@ fn test_signed_float_literal() {
 
 #[test]
 fn test_bytes_literal() {
-    let tokens = Lexer::collect_tokens("0xDEADBEEF 0x00 0xabc123");
+    let tokens = collect_tokens("0xDEADBEEF 0x00 0xabc123");
     assert_eq!(
         tokens,
         vec![
@@ -148,7 +161,7 @@ fn test_bytes_literal() {
 
 #[test]
 fn test_identifiers() {
-    let tokens = Lexer::collect_tokens("myVar MyConverter");
+    let tokens = collect_tokens("myVar MyConverter");
     assert_eq!(
         tokens,
         vec![Token::LowerIdent("myVar"), Token::UpperIdent("MyConverter"),]
@@ -157,7 +170,7 @@ fn test_identifiers() {
 
 #[test]
 fn test_editor_invocation() {
-    let tokens = Lexer::collect_tokens("set(x, \"value\")");
+    let tokens = collect_tokens("set(x, \"value\")");
     assert_eq!(
         tokens,
         vec![
@@ -173,7 +186,7 @@ fn test_editor_invocation() {
 
 #[test]
 fn test_converter_invocation() {
-    let tokens = Lexer::collect_tokens("Concat(a, b)[0]");
+    let tokens = collect_tokens("Concat(a, b)[0]");
     assert_eq!(
         tokens,
         vec![
@@ -192,7 +205,7 @@ fn test_converter_invocation() {
 
 #[test]
 fn test_path_expression() {
-    let tokens = Lexer::collect_tokens("resource.attributes[\"key\"]");
+    let tokens = collect_tokens("resource.attributes[\"key\"]");
     assert_eq!(
         tokens,
         vec![
@@ -208,7 +221,7 @@ fn test_path_expression() {
 
 #[test]
 fn test_boolean_expression() {
-    let tokens = Lexer::collect_tokens("x == 1 and y > 2 or not z");
+    let tokens = collect_tokens("x == 1 and y > 2 or not z");
     assert_eq!(
         tokens,
         vec![
@@ -228,7 +241,7 @@ fn test_boolean_expression() {
 
 #[test]
 fn test_math_expression() {
-    let tokens = Lexer::collect_tokens("10 + 20 * 3");
+    let tokens = collect_tokens("10 + 20 * 3");
     assert_eq!(
         tokens,
         vec![
@@ -243,7 +256,7 @@ fn test_math_expression() {
 
 #[test]
 fn test_full_statement() {
-    let tokens = Lexer::collect_tokens(r#"set(attributes["key"], "value") where status == 200"#);
+    let tokens = collect_tokens(r#"set(attributes["key"], "value") where status == 200"#);
     assert_eq!(
         tokens,
         vec![
@@ -266,7 +279,7 @@ fn test_full_statement() {
 
 #[test]
 fn test_named_args() {
-    let tokens = Lexer::collect_tokens("merge(target = x, source = y)");
+    let tokens = collect_tokens("merge(target = x, source = y)");
     assert_eq!(
         tokens,
         vec![
@@ -286,7 +299,7 @@ fn test_named_args() {
 
 #[test]
 fn test_map_literal() {
-    let tokens = Lexer::collect_tokens(r#"{"key": "value", "count": 42}"#);
+    let tokens = collect_tokens(r#"{"key": "value", "count": 42}"#);
     assert_eq!(
         tokens,
         vec![
@@ -305,7 +318,7 @@ fn test_map_literal() {
 
 #[test]
 fn test_list_literal() {
-    let tokens = Lexer::collect_tokens("[1, 2, 3]");
+    let tokens = collect_tokens("[1, 2, 3]");
     assert_eq!(
         tokens,
         vec![
@@ -322,7 +335,7 @@ fn test_list_literal() {
 
 #[test]
 fn test_enum() {
-    let tokens = Lexer::collect_tokens("SPAN_KIND_SERVER STATUS_OK");
+    let tokens = collect_tokens("SPAN_KIND_SERVER STATUS_OK");
     assert_eq!(
         tokens,
         vec![
@@ -334,7 +347,7 @@ fn test_enum() {
 
 #[test]
 fn test_whitespace_handling() {
-    let tokens = Lexer::collect_tokens("  set  (  x  ,  y  )  ");
+    let tokens = collect_tokens("  set  (  x  ,  y  )  ");
     assert_eq!(
         tokens,
         vec![

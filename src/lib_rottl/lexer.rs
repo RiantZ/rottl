@@ -98,7 +98,7 @@ pub enum Token<'a> {
     #[regex(r"0x[0-9a-fA-F]+", |lex| lex.slice())]
     BytesLiteral(&'a str),
 
-    /// Float literal: 3.14, .5
+    /// Float literal: 6.14, .5
     #[regex(r"[0-9]+\.[0-9]*|\.[0-9]+", |lex| lex.slice())]
     FloatLiteral(&'a str),
 
@@ -143,14 +143,6 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    /// Collect all tokens into a vector
-    /// Note: This method skips invalid tokens for backward compatibility
-    pub fn collect_tokens(input: &'a str) -> Vec<Token<'a>> {
-        Token::lexer(input)
-            .filter_map(|result| result.ok())
-            .collect()
-    }
-
     /// Collect tokens with their positions (spans)
     /// Returns an error if any invalid token is encountered
     pub fn collect_with_spans(

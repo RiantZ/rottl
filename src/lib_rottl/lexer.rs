@@ -135,11 +135,9 @@ impl std::fmt::Display for LexerError {
     }
 }
 
-impl std::error::Error for LexerError {}
-
 /// Lexical analysis result
 pub struct Lexer<'a> {
-    _lexer: logos::Lexer<'a, Token<'a>>,
+    lexer: logos::Lexer<'a, Token<'a>>,
 }
 
 impl<'a> Lexer<'a> {
@@ -171,6 +169,6 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = Result<Token<'a>, ()>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self._lexer.next()
+        self.lexer.next()
     }
 }

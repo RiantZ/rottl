@@ -6,7 +6,7 @@
 /// # Example
 ///
 /// ```ignore
-/// use rottl::{Parser, OttlParser, CallbackMap, EnumMap, PathResolver};
+/// use ottl::{Parser, OttlParser, CallbackMap, EnumMap, PathResolver};
 ///
 /// let editors = CallbackMap::new();
 /// let converters = CallbackMap::new();
@@ -172,7 +172,7 @@ pub type EnumMap = HashMap<String, i64>;
 /// # Example
 ///
 /// ```ignore
-/// use rottl::{OttlParser, Parser};
+/// use ottl::{OttlParser, Parser};
 ///
 /// let parser = Parser::new(...);
 ///

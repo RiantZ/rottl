@@ -208,7 +208,7 @@ impl Parser {
         }
 
         // Extract just the tokens for parsing
-        let tokens: Vec<Token> = tokens_with_spans.iter().map(|(t, _)| t.clone()).collect();
+        let tokens: Vec<Token> = tokens_with_spans.into_iter().map(|(t, _)| t).collect();
 
         // Build the chumsky parser
         let chumsky_parser = build_parser(editors_map, converters_map, enums_map);
@@ -331,6 +331,7 @@ fn literal_parser<'a>(
     .map(ValueExpr::Literal)
 }
 
+// =====================================================================================================================
 /// Parser for index expressions: "[" (string | int) "]"
 fn index_parser<'a>() -> impl chumsky::Parser<'a, TokenInput<'a>, IndexExpr, ParserExtra<'a>> + Clone
 {
@@ -353,6 +354,7 @@ fn index_parser<'a>() -> impl chumsky::Parser<'a, TokenInput<'a>, IndexExpr, Par
         .delimited_by(just(&Token::LBracket), just(&Token::RBracket))
 }
 
+// =====================================================================================================================
 /// Parser for lowercase identifiers
 fn lower_ident_parser<'a>(
 ) -> impl chumsky::Parser<'a, TokenInput<'a>, String, ParserExtra<'a>> + Clone {
@@ -361,6 +363,7 @@ fn lower_ident_parser<'a>(
     }
 }
 
+// =====================================================================================================================
 /// Parser for uppercase identifiers
 fn upper_ident_parser<'a>(
 ) -> impl chumsky::Parser<'a, TokenInput<'a>, String, ParserExtra<'a>> + Clone {
@@ -369,6 +372,7 @@ fn upper_ident_parser<'a>(
     }
 }
 
+// =====================================================================================================================
 /// Parser for path expressions: lower_ident ("." ident_segment)* index*
 fn path_parser<'a>() -> impl chumsky::Parser<'a, TokenInput<'a>, PathExpr, ParserExtra<'a>> + Clone
 {
@@ -391,6 +395,7 @@ fn path_parser<'a>() -> impl chumsky::Parser<'a, TokenInput<'a>, PathExpr, Parse
         })
 }
 
+// =====================================================================================================================
 /// Parser for comparison operators
 fn comp_op_parser<'a>() -> impl chumsky::Parser<'a, TokenInput<'a>, CompOp, ParserExtra<'a>> + Clone
 {
@@ -404,6 +409,7 @@ fn comp_op_parser<'a>() -> impl chumsky::Parser<'a, TokenInput<'a>, CompOp, Pars
     ))
 }
 
+// =====================================================================================================================
 /// Parser for argument list (used by both value_expr and editor_call)
 /// Takes a value_expr parser that can handle math expressions
 fn arg_list_parser<'a>(
@@ -425,6 +431,7 @@ fn arg_list_parser<'a>(
         .collect::<Vec<_>>()
 }
 
+// =====================================================================================================================
 /// Wraps a MathExpr into ValueExpr, unwrapping simple Primary values
 fn math_to_value_expr(math: MathExpr) -> ValueExpr {
     match math {
@@ -435,6 +442,7 @@ fn math_to_value_expr(math: MathExpr) -> ValueExpr {
     }
 }
 
+// =====================================================================================================================
 /// Creates a math expression parser (shared logic for comparison and root contexts)
 fn make_math_expr<'a>(
     value_expr: impl chumsky::Parser<'a, TokenInput<'a>, ValueExpr, ParserExtra<'a>> + Clone + 'a,
@@ -517,7 +525,6 @@ fn make_math_expr<'a>(
 // =====================================================================================================================
 // Main Parser Builder
 // =====================================================================================================================
-
 /// Build the chumsky parser for OTTL (chumsky 0.12 API)
 fn build_parser<'a>(
     editors_map: &'a CallbackMap,
@@ -744,10 +751,10 @@ fn build_parser<'a>(
 // =====================================================================================================================
 // AST Evaluation
 // =====================================================================================================================
-
 /// Evaluate the root expression
 fn evaluate_root(root: &RootExpr, ctx: &mut EvalContext, resolver: &PathResolver) -> Result<Value> {
     match root {
+        //most probable case ...
         RootExpr::EditorStatement(stmt) => {
             let should_execute = if let Some(ref cond) = stmt.condition {
                 evaluate_bool_expr(cond, ctx, resolver)?
@@ -769,6 +776,7 @@ fn evaluate_root(root: &RootExpr, ctx: &mut EvalContext, resolver: &PathResolver
     }
 }
 
+// =====================================================================================================================
 /// Evaluate a boolean expression
 fn evaluate_bool_expr(
     expr: &BoolExpr,
@@ -817,6 +825,7 @@ fn evaluate_bool_expr(
     }
 }
 
+// =====================================================================================================================
 /// Evaluate a comparison
 fn evaluate_comparison(left: &Value, op: &CompOp, right: &Value) -> Result<bool> {
     match (left, right) {
@@ -916,6 +925,7 @@ fn evaluate_comparison(left: &Value, op: &CompOp, right: &Value) -> Result<bool>
     }
 }
 
+// =====================================================================================================================
 /// Evaluate a value expression
 fn evaluate_value_expr(
     expr: &ValueExpr,
@@ -945,6 +955,7 @@ fn evaluate_value_expr(
     }
 }
 
+// =====================================================================================================================
 /// Evaluate a path expression
 fn evaluate_path(path: &PathExpr, ctx: &mut EvalContext, resolver: &PathResolver) -> Result<Value> {
     let path_str = path.segments.join(".");
@@ -959,7 +970,11 @@ fn evaluate_path(path: &PathExpr, ctx: &mut EvalContext, resolver: &PathResolver
     Ok(current)
 }
 
+// =====================================================================================================================
 /// Apply an index to a value
+/// AZH: perhaps later index resolution we shall be delegated to integrator ...
+/// perf. tests shall be used to compare different options.
+/// For the time being the optimization without certitude that it worth it is postponed.
 fn apply_index(value: &Value, index: &IndexExpr) -> Result<Value> {
     match (value, index) {
         (Value::List(list), IndexExpr::Int(i)) => {
@@ -991,6 +1006,7 @@ fn apply_index(value: &Value, index: &IndexExpr) -> Result<Value> {
     }
 }
 
+// =====================================================================================================================
 /// Evaluate a function call
 fn evaluate_function_call(
     fc: &FunctionCall,
@@ -1030,6 +1046,7 @@ fn evaluate_function_call(
     Ok(current)
 }
 
+// =====================================================================================================================
 /// Evaluate a math expression
 fn evaluate_math_expr(
     expr: &MathExpr,
@@ -1054,6 +1071,7 @@ fn evaluate_math_expr(
     }
 }
 
+// =====================================================================================================================
 /// Evaluate a math operation
 fn evaluate_math_op(left: &Value, op: &MathOp, right: &Value) -> Result<Value> {
     match (left, right) {

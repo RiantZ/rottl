@@ -54,6 +54,7 @@ pub type EvalContext = Box<dyn Any>;
 // =====================================================================================================================
 
 /// Represents all possible values in OTTL expressions and function arguments.
+/// Uses Arc<str> for strings and Arc<[u8]> for bytes to enable cheap cloning.
 #[derive(Clone, Default, Debug, PartialEq /* , Eq, PartialOrd - not applicable it seems */)]
 pub enum Value {
     /// Nil/null value
@@ -65,14 +66,28 @@ pub enum Value {
     Int(i64),
     /// 64-bit floating point
     Float(f64),
-    /// String value
-    String(String),
-    /// Bytes literal (e.g., 0xC0FFEE)
-    Bytes(Vec<u8>),
+    /// String value (Arc for cheap clone)
+    String(Arc<str>),
+    /// Bytes literal (e.g., 0xC0FFEE) - Arc for cheap clone
+    Bytes(Arc<[u8]>),
     /// List of values
     List(Vec<Value>),
-    /// Map of string keys to values
+    /// Map of string keys to values  
     Map(HashMap<String, Value>),
+}
+
+impl Value {
+    /// Create a string value from any string-like type
+    #[inline]
+    pub fn string(s: impl Into<Arc<str>>) -> Self {
+        Value::String(s.into())
+    }
+
+    /// Create a bytes value from any bytes-like type
+    #[inline]
+    pub fn bytes(b: impl Into<Arc<[u8]>>) -> Self {
+        Value::Bytes(b.into())
+    }
 }
 
 // =====================================================================================================================
@@ -132,8 +147,10 @@ impl Argument {
 
 /// Trait for accessing (reading and writing) path values in the context.
 pub trait PathAccessor: fmt::Debug {
-    /// Get the value at this path from the context
-    fn get(&self, ctx: &EvalContext, path: &str) -> Result<&Value>;
+    /// Get the value at this path from the context.
+    /// Returns owned Value - for primitive types this is cheap (Copy-like).
+    /// For strings/bytes, use Arc internally for cheap cloning.
+    fn get(&self, ctx: &EvalContext, path: &str) -> Result<Value>;
 
     /// Set the value at this path in the context
     fn set(&self, ctx: &mut EvalContext, path: &str, value: &Value) -> Result<()>;
@@ -148,10 +165,42 @@ pub type PathResolver =
 // Callback Types
 // =====================================================================================================================
 
+/// Trait for lazy argument evaluation - ZERO ALLOCATION at runtime!
+/// Arguments are evaluated only when requested by the callback.
+/// Contains both the evaluation context and lazy access to arguments.
+pub trait Args {
+    /// Access to evaluation context
+    fn ctx(&mut self) -> &mut EvalContext;
+
+    /// Number of arguments
+    fn len(&self) -> usize;
+
+    /// Check if empty
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Get argument value by index (lazy evaluation - NO ALLOCATION)
+    fn get(&mut self, index: usize) -> Result<Value>;
+
+    /// Get argument name by index (for named arguments)
+    fn name(&self, index: usize) -> Option<&str>;
+
+    /// Get named argument value (searches by name, lazy evaluation)
+    fn get_named(&mut self, name: &str) -> Option<Result<Value>> {
+        for i in 0..self.len() {
+            if self.name(i) == Some(name) {
+                return Some(self.get(i));
+            }
+        }
+        None
+    }
+}
+
 /// Callback function type for editors and converters.
-/// Takes a mutable context and a slice of arguments, returns a Value or error.
-/// Note: Uses slice (&[Argument]) instead of Vec for zero-allocation execution.
-pub type CallbackFn = Arc<dyn Fn(&mut EvalContext, &[Argument]) -> Result<Value> + Send + Sync>;
+/// Uses lazy Args trait for ZERO-ALLOCATION argument evaluation.
+/// Args provides both context access and lazy argument retrieval.
+pub type CallbackFn = Arc<dyn Fn(&mut dyn Args) -> Result<Value> + Send + Sync>;
 
 /// Map of function names to their callback implementations.
 pub type CallbackMap = HashMap<String, CallbackFn>;

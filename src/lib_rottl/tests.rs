@@ -403,7 +403,7 @@ fn test_argument_access() {
 struct StubPathAccessor;
 
 impl PathAccessor for StubPathAccessor {
-    fn get(&self, _ctx: &EvalContext, _path: &str) -> crate::Result<&Value> {
+    fn get(&self, _ctx: &EvalContext, _path: &str) -> crate::Result<Value> {
         Err("StubPathAccessor: get not implemented".into())
     }
 
@@ -489,10 +489,10 @@ struct MockPathAccessor {
 }
 
 impl PathAccessor for MockPathAccessor {
-    fn get(&self, _ctx: &EvalContext, path: &str) -> crate::Result<&Value> {
+    fn get(&self, _ctx: &EvalContext, path: &str) -> crate::Result<Value> {
         match path {
-            "my.bool.value" => Ok(&self.bool_value),
-            "my.int.value" => Ok(&self.int_value),
+            "my.bool.value" => Ok(self.bool_value.clone()),
+            "my.int.value" => Ok(self.int_value.clone()),
             _ => Err(format!("Unknown path: {}", path).into()),
         }
     }
@@ -557,13 +557,13 @@ fn test_parser_math_with_converters() {
     // Register Sum converter: Sum(a: int, b: int) -> int { a + b }
     converters.insert(
         "Sum".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
-            let a = match args.first().map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v,
+        Arc::new(|args: &mut dyn crate::Args| {
+            let a = match args.get(0)? {
+                Value::Int(v) => v,
                 _ => return Err("Sum: first argument must be int".into()),
             };
-            let b = match args.get(1).map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v,
+            let b = match args.get(1)? {
+                Value::Int(v) => v,
                 _ => return Err("Sum: second argument must be int".into()),
             };
             Ok(Value::Int(a + b))
@@ -754,13 +754,13 @@ fn test_parser_enums_as_function_args() {
     // Register Sum converter: Sum(a: int, b: int) -> int { a + b }
     converters.insert(
         "Sum".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
-            let a = match args.first().map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v,
+        Arc::new(|args: &mut dyn crate::Args| {
+            let a = match args.get(0)? {
+                Value::Int(v) => v,
                 _ => return Err("Sum: first argument must be int".into()),
             };
-            let b = match args.get(1).map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v,
+            let b = match args.get(1)? {
+                Value::Int(v) => v,
                 _ => return Err("Sum: second argument must be int".into()),
             };
             Ok(Value::Int(a + b))
@@ -770,13 +770,13 @@ fn test_parser_enums_as_function_args() {
     // Register Multiply converter: Multiply(a: int, b: int) -> int { a * b }
     converters.insert(
         "Multiply".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
-            let a = match args.first().map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v,
+        Arc::new(|args: &mut dyn crate::Args| {
+            let a = match args.get(0)? {
+                Value::Int(v) => v,
                 _ => return Err("Multiply: first argument must be int".into()),
             };
-            let b = match args.get(1).map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v,
+            let b = match args.get(1)? {
+                Value::Int(v) => v,
                 _ => return Err("Multiply: second argument must be int".into()),
             };
             Ok(Value::Int(a * b))
@@ -863,11 +863,11 @@ struct TrackingPathAccessor {
 }
 
 impl PathAccessor for TrackingPathAccessor {
-    fn get(&self, _ctx: &EvalContext, path: &str) -> crate::Result<&Value> {
+    fn get(&self, _ctx: &EvalContext, path: &str) -> crate::Result<Value> {
         match path {
-            "my.int.value" => Ok(&self.int_value),
-            "status_code" => Ok(&self.status_code),
-            "target" | "x" => Ok(&self.target_path), // For editor's first argument
+            "my.int.value" => Ok(self.int_value.clone()),
+            "status_code" => Ok(self.status_code.clone()),
+            "target" | "x" => Ok(self.target_path.clone()), // For editor's first argument
             _ => Err(format!("Unknown path: {}", path).into()),
         }
     }
@@ -913,11 +913,11 @@ fn test_editor_executes_when_condition_true() {
     let mut editors = CallbackMap::new();
     editors.insert(
         "set".to_string(),
-        Arc::new(move |_ctx: &mut EvalContext, args: &[Argument]| {
+        Arc::new(move |args: &mut dyn crate::Args| {
             let mut capture = capture_clone.lock().unwrap();
             capture.called = true;
-            capture.first_arg = args.first().map(|a| a.value().clone());
-            capture.second_arg = args.get(1).map(|a| a.value().clone());
+            capture.first_arg = args.get(0).ok();
+            capture.second_arg = args.get(1).ok();
             Ok(Value::Nil)
         }),
     );
@@ -926,15 +926,15 @@ fn test_editor_executes_when_condition_true() {
     // Sum converter: Sum(a, b) -> a + b
     converters.insert(
         "Sum".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
-            let a = match args.first().map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v as f64,
-                Some(Value::Float(v)) => *v,
+        Arc::new(|args: &mut dyn crate::Args| {
+            let a = match args.get(0)? {
+                Value::Int(v) => v as f64,
+                Value::Float(v) => v,
                 _ => return Err("Sum: first argument must be numeric".into()),
             };
-            let b = match args.get(1).map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v as f64,
-                Some(Value::Float(v)) => *v,
+            let b = match args.get(1)? {
+                Value::Int(v) => v as f64,
+                Value::Float(v) => v,
                 _ => return Err("Sum: second argument must be numeric".into()),
             };
             Ok(Value::Float(a + b))
@@ -1001,11 +1001,11 @@ fn test_editor_not_executed_when_condition_false() {
     let mut editors = CallbackMap::new();
     editors.insert(
         "set".to_string(),
-        Arc::new(move |_ctx: &mut EvalContext, args: &[Argument]| {
+        Arc::new(move |args: &mut dyn crate::Args| {
             let mut capture = capture_clone.lock().unwrap();
             capture.called = true;
-            capture.first_arg = args.first().map(|a| a.value().clone());
-            capture.second_arg = args.get(1).map(|a| a.value().clone());
+            capture.first_arg = args.get(0).ok();
+            capture.second_arg = args.get(1).ok();
             Ok(Value::Nil)
         }),
     );
@@ -1013,15 +1013,15 @@ fn test_editor_not_executed_when_condition_false() {
     let mut converters = CallbackMap::new();
     converters.insert(
         "Sum".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
-            let a = match args.first().map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v as f64,
-                Some(Value::Float(v)) => *v,
+        Arc::new(|args: &mut dyn crate::Args| {
+            let a = match args.get(0)? {
+                Value::Int(v) => v as f64,
+                Value::Float(v) => v,
                 _ => return Err("Sum: first argument must be numeric".into()),
             };
-            let b = match args.get(1).map(|arg| arg.value()) {
-                Some(Value::Int(v)) => *v as f64,
-                Some(Value::Float(v)) => *v,
+            let b = match args.get(1)? {
+                Value::Int(v) => v as f64,
+                Value::Float(v) => v,
                 _ => return Err("Sum: second argument must be numeric".into()),
             };
             Ok(Value::Float(a + b))
@@ -1083,11 +1083,11 @@ fn test_editor_set_list_of_maps() {
     let mut editors = CallbackMap::new();
     editors.insert(
         "set".to_string(),
-        Arc::new(move |_ctx: &mut EvalContext, args: &[Argument]| {
+        Arc::new(move |args: &mut dyn crate::Args| {
             let mut capture = capture_clone.lock().unwrap();
             capture.called = true;
-            capture.first_arg = args.first().map(|a| a.value().clone());
-            capture.second_arg = args.get(1).map(|a| a.value().clone());
+            capture.first_arg = args.get(0).ok();
+            capture.second_arg = args.get(1).ok();
             Ok(Value::Nil)
         }),
     );
@@ -1096,10 +1096,10 @@ fn test_editor_set_list_of_maps() {
     // Double converter: Double(x) -> x * 2
     converters.insert(
         "Double".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
-            match args.first().map(|arg| arg.value()) {
-                Some(Value::Int(v)) => Ok(Value::Int(v * 2)),
-                Some(Value::Float(v)) => Ok(Value::Float(v * 2.0)),
+        Arc::new(|args: &mut dyn crate::Args| {
+            match args.get(0)? {
+                Value::Int(v) => Ok(Value::Int(v * 2)),
+                Value::Float(v) => Ok(Value::Float(v * 2.0)),
                 _ => Err("Double: argument must be numeric".into()),
             }
         }),
@@ -1182,12 +1182,12 @@ struct PathExprAccessor {
 }
 
 impl PathAccessor for PathExprAccessor {
-    fn get(&self, _ctx: &EvalContext, path: &str) -> crate::Result<&Value> {
+    fn get(&self, _ctx: &EvalContext, path: &str) -> crate::Result<Value> {
         match path {
-            "resource.attributes.status" => Ok(&self.resource_status),
-            "resource.count" => Ok(&self.resource_count),
-            "items" => Ok(&self.items),
-            "data" => Ok(&self.data),
+            "resource.attributes.status" => Ok(self.resource_status.clone()),
+            "resource.count" => Ok(self.resource_count.clone()),
+            "items" => Ok(self.items.clone()),
+            "data" => Ok(self.data.clone()),
             _ => Err(format!("Unknown path: {}", path).into()),
         }
     }
@@ -1271,19 +1271,16 @@ fn test_converter_with_index() {
     // Split converter: splits string by delimiter, returns list
     converters.insert(
         "Split".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
-            let text = match args.first().map(|arg| arg.value()) {
-                Some(Value::String(s)) => s.clone(),
+        Arc::new(|args: &mut dyn crate::Args| {
+            let text = match args.get(0)? {
+                Value::String(s) => s,
                 _ => return Err("Split first argument must be string".into()),
             };
-            let delimiter = match args.get(1).map(|arg| arg.value()) {
-                Some(Value::String(s)) => s.clone(),
+            let delimiter = match args.get(1)? {
+                Value::String(s) => s,
                 _ => return Err("Split second argument must be string".into()),
             };
-            let parts: Vec<Value> = text
-                .split(&delimiter)
-                .map(|s| Value::String(s.to_string()))
-                .collect();
+            let parts: Vec<Value> = text.split(delimiter.as_ref()).map(|s| Value::string(s)).collect();
             Ok(Value::List(parts))
         }),
     );
@@ -1326,33 +1323,29 @@ fn test_named_arguments() {
     // Uses named arguments: value and format
     converters.insert(
         "Convert".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
-            // Find arguments by name
-            let value_arg = args
-                .iter()
-                .find(|a| a.name() == Some("value"))
-                .or_else(|| args.first())
-                .ok_or("Convert requires value argument")?;
-            let format_arg = args
-                .iter()
-                .find(|a| a.name() == Some("format"))
-                .or_else(|| args.get(1))
-                .ok_or("Convert requires format argument")?;
+        Arc::new(|args: &mut dyn crate::Args| {
+            // Find arguments by name or positional fallback
+            let value_val = args
+                .get_named("value")
+                .unwrap_or_else(|| args.get(0))?;
+            let format_val = args
+                .get_named("format")
+                .unwrap_or_else(|| args.get(1))?;
 
-            let value = match value_arg.value() {
+            let value = match value_val {
                 Value::Int(n) => n,
                 _ => return Err("value must be integer".into()),
             };
-            let format = match format_arg.value() {
-                Value::String(s) => s.clone(),
+            let format = match format_val {
+                Value::String(s) => s,
                 _ => return Err("format must be string".into()),
             };
 
-            match format.as_str() {
-                "hex" => Ok(Value::String(format!("{:x}", value))),
-                "binary" => Ok(Value::String(format!("{:b}", value))),
-                "octal" => Ok(Value::String(format!("{:o}", value))),
-                _ => Ok(Value::String(value.to_string())),
+            match format.as_ref() {
+                "hex" => Ok(Value::string(format!("{:x}", value))),
+                "binary" => Ok(Value::string(format!("{:b}", value))),
+                "octal" => Ok(Value::string(format!("{:o}", value))),
+                _ => Ok(Value::string(value.to_string())),
             }
         }),
     );
@@ -1569,7 +1562,7 @@ fn test_parser_error_missing_comma_in_function() {
     let mut editors = CallbackMap::new();
     editors.insert(
         "func".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| Ok(Value::Nil)),
+        Arc::new(|_args: &mut dyn crate::Args| Ok(Value::Nil)),
     );
     let converters = CallbackMap::new();
     let enums = EnumMap::new();
@@ -1868,7 +1861,7 @@ fn test_runtime_error_index_out_of_bounds() {
     // Register a converter that returns a small list
     converters.insert(
         "GetList".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| {
+        Arc::new(|_args: &mut dyn crate::Args| {
             Ok(Value::List(vec![Value::Int(1), Value::Int(2)]))
         }),
     );
@@ -1903,9 +1896,7 @@ fn test_runtime_error_negate_string() {
     // Register a converter that returns a string
     converters.insert(
         "GetString".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| {
-            Ok(Value::String("hello".to_string()))
-        }),
+        Arc::new(|_args: &mut dyn crate::Args| Ok(Value::string("hello"))),
     );
 
     let enums = EnumMap::new();
@@ -1951,7 +1942,7 @@ fn test_runtime_error_key_not_found_in_map() {
     // Register a converter that returns a map
     converters.insert(
         "GetMap".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| {
+        Arc::new(|_args: &mut dyn crate::Args| {
             let mut map = std::collections::HashMap::new();
             map.insert("key1".to_string(), Value::Int(1));
             Ok(Value::Map(map))
@@ -2017,19 +2008,17 @@ struct BenchPathAccessor {
 }
 
 impl PathAccessor for BenchPathAccessor {
-    fn get(&self, _ctx: &EvalContext, _path: &str) -> crate::Result<&Value> {
+    #[inline]
+    fn get(&self, _ctx: &EvalContext, _path: &str) -> crate::Result<Value> {
         // Return different values based on path pattern
-        static INT_VAL: Value = Value::Int(42);
-        static BOOL_VAL: Value = Value::Bool(true);
-        static FLOAT_VAL: Value = Value::Float(6.14);
-
+        // These are primitive types - essentially free to "copy"
         if self.path.contains("int") || self.path.contains("count") || self.path.contains("status")
         {
-            Ok(&INT_VAL)
+            Ok(Value::Int(42))
         } else if self.path.contains("bool") || self.path.contains("enabled") {
-            Ok(&BOOL_VAL)
+            Ok(Value::Bool(true))
         } else {
-            Ok(&FLOAT_VAL)
+            Ok(Value::Float(6.14))
         }
     }
 
@@ -2128,13 +2117,13 @@ fn bench_execute_with_converters() {
     // Simple converter that adds two numbers
     converters.insert(
         "Add".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[crate::Argument]| {
-            let a = match args.first().map(|a| a.value()) {
-                Some(Value::Int(n)) => *n,
+        Arc::new(|args: &mut dyn crate::Args| {
+            let a = match args.get(0).ok() {
+                Some(Value::Int(n)) => n,
                 _ => 0,
             };
-            let b = match args.get(1).map(|a| a.value()) {
-                Some(Value::Int(n)) => *n,
+            let b = match args.get(1).ok() {
+                Some(Value::Int(n)) => n,
                 _ => 0,
             };
             Ok(Value::Int(a + b))
@@ -2144,8 +2133,8 @@ fn bench_execute_with_converters() {
     // Converter that returns length
     converters.insert(
         "Len".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: &[crate::Argument]| {
-            match args.first().map(|a| a.value()) {
+        Arc::new(|args: &mut dyn crate::Args| {
+            match args.get(0).ok() {
                 Some(Value::String(s)) => Ok(Value::Int(s.len() as i64)),
                 Some(Value::List(l)) => Ok(Value::Int(l.len() as i64)),
                 _ => Ok(Value::Int(0)),
@@ -2173,7 +2162,7 @@ fn bench_execute_complex_realistic() {
     // set editor (does nothing in benchmark)
     editors.insert(
         "set".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| Ok(Value::Nil)),
+        Arc::new(|_args: &mut dyn crate::Args| Ok(Value::Nil)),
     );
 
     let mut enums = EnumMap::new();

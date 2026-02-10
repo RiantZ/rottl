@@ -4,17 +4,13 @@
 
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
-use smallvec::SmallVec;
 use std::sync::Arc;
 
 use super::lexer::Token;
 use super::{
-    Argument, BoxError, CallbackFn, CallbackMap, EnumMap, EvalContext, OttlParser, PathAccessor,
+    Args, BoxError, CallbackFn, CallbackMap, EnumMap, EvalContext, OttlParser, PathAccessor,
     PathResolver, Result, Value,
 };
-
-/// Small stack-allocated vector for function arguments (avoids heap allocation for most calls)
-type ArgsVec = SmallVec<[Argument; 4]>;
 
 // =====================================================================================================================
 // Arena-based AST Types
@@ -402,6 +398,80 @@ fn convert_to_arena(
     }
 }
 
+/// Check if a ValueExpr is a literal and get its value
+fn try_get_literal(expr: &ValueExpr) -> Option<&Value> {
+    match expr {
+        ValueExpr::Literal(v) => Some(v),
+        _ => None,
+    }
+}
+
+/// Check if arena bool expr is a literal
+fn arena_bool_is_literal(arena: &AstArena, r: BoolExprRef) -> Option<bool> {
+    match arena.get_bool(r) {
+        ArenaBoolExpr::Literal(b) => Some(*b),
+        _ => None,
+    }
+}
+
+/// Evaluate comparison at compile time for two literal values
+fn eval_comparison_const(left: &Value, op: &CompOp, right: &Value) -> Option<bool> {
+    match (left, right) {
+        (Value::Int(l), Value::Int(r)) => Some(match op {
+            CompOp::Eq => l == r,
+            CompOp::NotEq => l != r,
+            CompOp::Less => l < r,
+            CompOp::Greater => l > r,
+            CompOp::LessEq => l <= r,
+            CompOp::GreaterEq => l >= r,
+        }),
+        (Value::Float(l), Value::Float(r)) => Some(match op {
+            CompOp::Eq => l == r,
+            CompOp::NotEq => l != r,
+            CompOp::Less => l < r,
+            CompOp::Greater => l > r,
+            CompOp::LessEq => l <= r,
+            CompOp::GreaterEq => l >= r,
+        }),
+        (Value::Int(l), Value::Float(r)) => {
+            let l = *l as f64;
+            Some(match op {
+                CompOp::Eq => l == *r,
+                CompOp::NotEq => l != *r,
+                CompOp::Less => l < *r,
+                CompOp::Greater => l > *r,
+                CompOp::LessEq => l <= *r,
+                CompOp::GreaterEq => l >= *r,
+            })
+        }
+        (Value::Float(l), Value::Int(r)) => {
+            let r = *r as f64;
+            Some(match op {
+                CompOp::Eq => *l == r,
+                CompOp::NotEq => *l != r,
+                CompOp::Less => *l < r,
+                CompOp::Greater => *l > r,
+                CompOp::LessEq => *l <= r,
+                CompOp::GreaterEq => *l >= r,
+            })
+        }
+        (Value::Bool(l), Value::Bool(r)) => Some(match op {
+            CompOp::Eq => l == r,
+            CompOp::NotEq => l != r,
+            _ => return None,
+        }),
+        (Value::String(l), Value::String(r)) => Some(match op {
+            CompOp::Eq => l == r,
+            CompOp::NotEq => l != r,
+            CompOp::Less => l < r,
+            CompOp::Greater => l > r,
+            CompOp::LessEq => l <= r,
+            CompOp::GreaterEq => l >= r,
+        }),
+        _ => None,
+    }
+}
+
 fn convert_bool_expr(
     expr: &BoolExpr,
     arena: &mut AstArena,
@@ -410,6 +480,14 @@ fn convert_bool_expr(
     let arena_expr = match expr {
         BoolExpr::Literal(b) => ArenaBoolExpr::Literal(*b),
         BoolExpr::Comparison { left, op, right } => {
+            // CONSTANT FOLDING: if both sides are literals, compute at parse time!
+            if let (Some(left_val), Some(right_val)) =
+                (try_get_literal(left), try_get_literal(right))
+            {
+                if let Some(result) = eval_comparison_const(left_val, op, right_val) {
+                    return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(result)));
+                }
+            }
             let left_ref = convert_value_expr(left, arena, resolver)?;
             let right_ref = convert_value_expr(right, arena, resolver)?;
             ArenaBoolExpr::Comparison {
@@ -429,20 +507,121 @@ fn convert_bool_expr(
         }
         BoolExpr::Not(inner) => {
             let inner_ref = convert_bool_expr(inner, arena, resolver)?;
+            // CONSTANT FOLDING: not(literal) => !literal
+            if let Some(b) = arena_bool_is_literal(arena, inner_ref) {
+                return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(!b)));
+            }
             ArenaBoolExpr::Not(inner_ref)
         }
         BoolExpr::And(left, right) => {
             let left_ref = convert_bool_expr(left, arena, resolver)?;
+            // CONSTANT FOLDING: false && x => false, true && x => x
+            if let Some(left_val) = arena_bool_is_literal(arena, left_ref) {
+                if !left_val {
+                    return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(false)));
+                }
+                // left is true, result is just right
+                return convert_bool_expr(right, arena, resolver);
+            }
             let right_ref = convert_bool_expr(right, arena, resolver)?;
+            // CONSTANT FOLDING: x && false => false, x && true => x
+            if let Some(right_val) = arena_bool_is_literal(arena, right_ref) {
+                if !right_val {
+                    return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(false)));
+                }
+                // right is true, result is just left
+                return Ok(left_ref);
+            }
             ArenaBoolExpr::And(left_ref, right_ref)
         }
         BoolExpr::Or(left, right) => {
             let left_ref = convert_bool_expr(left, arena, resolver)?;
+            // CONSTANT FOLDING: true || x => true, false || x => x
+            if let Some(left_val) = arena_bool_is_literal(arena, left_ref) {
+                if left_val {
+                    return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(true)));
+                }
+                // left is false, result is just right
+                return convert_bool_expr(right, arena, resolver);
+            }
             let right_ref = convert_bool_expr(right, arena, resolver)?;
+            // CONSTANT FOLDING: x || true => true, x || false => x
+            if let Some(right_val) = arena_bool_is_literal(arena, right_ref) {
+                if right_val {
+                    return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(true)));
+                }
+                // right is false, result is just left
+                return Ok(left_ref);
+            }
             ArenaBoolExpr::Or(left_ref, right_ref)
         }
     };
     Ok(arena.alloc_bool(arena_expr))
+}
+
+/// Try to get literal value from a MathExpr
+fn try_get_math_literal(expr: &MathExpr) -> Option<&Value> {
+    match expr {
+        MathExpr::Primary(ValueExpr::Literal(v)) => Some(v),
+        _ => None,
+    }
+}
+
+/// Evaluate math operation at compile time
+fn eval_math_const(left: &Value, op: &MathOp, right: &Value) -> Option<Value> {
+    match (left, right) {
+        (Value::Int(l), Value::Int(r)) => Some(match op {
+            MathOp::Add => Value::Int(l + r),
+            MathOp::Sub => Value::Int(l - r),
+            MathOp::Mul => Value::Int(l * r),
+            MathOp::Div => {
+                if *r == 0 {
+                    return None;
+                }
+                Value::Int(l / r)
+            }
+        }),
+        (Value::Float(l), Value::Float(r)) => Some(match op {
+            MathOp::Add => Value::Float(l + r),
+            MathOp::Sub => Value::Float(l - r),
+            MathOp::Mul => Value::Float(l * r),
+            MathOp::Div => {
+                if *r == 0.0 {
+                    return None; // Don't fold division by zero - let runtime handle it
+                }
+                Value::Float(l / r)
+            }
+        }),
+        (Value::Int(l), Value::Float(r)) => {
+            let l = *l as f64;
+            Some(match op {
+                MathOp::Add => Value::Float(l + r),
+                MathOp::Sub => Value::Float(l - r),
+                MathOp::Mul => Value::Float(l * r),
+                MathOp::Div => {
+                    if *r == 0.0 {
+                        return None;
+                    }
+                    Value::Float(l / r)
+                }
+            })
+        }
+        (Value::Float(l), Value::Int(r)) => {
+            let r = *r as f64;
+            Some(match op {
+                MathOp::Add => Value::Float(l + r),
+                MathOp::Sub => Value::Float(l - r),
+                MathOp::Mul => Value::Float(l * r),
+                MathOp::Div => {
+                    if r == 0.0 {
+                        return None;
+                    }
+                    Value::Float(l / r)
+                }
+            })
+        }
+        _ => None,
+    }
 }
 
 fn convert_math_expr(
@@ -456,10 +635,31 @@ fn convert_math_expr(
             ArenaMathExpr::Primary(v_ref)
         }
         MathExpr::Negate(inner) => {
+            // CONSTANT FOLDING: -literal => literal negated
+            if let Some(val) = try_get_math_literal(inner) {
+                let negated = match val {
+                    Value::Int(i) => Some(Value::Int(-i)),
+                    Value::Float(f) => Some(Value::Float(-f)),
+                    _ => None,
+                };
+                if let Some(v) = negated {
+                    let v_ref = arena.alloc_value(ArenaValueExpr::Literal(v));
+                    return Ok(arena.alloc_math(ArenaMathExpr::Primary(v_ref)));
+                }
+            }
             let inner_ref = convert_math_expr(inner, arena, resolver)?;
             ArenaMathExpr::Negate(inner_ref)
         }
         MathExpr::Binary { left, op, right } => {
+            // CONSTANT FOLDING: literal op literal => computed literal
+            if let (Some(left_val), Some(right_val)) =
+                (try_get_math_literal(left), try_get_math_literal(right))
+            {
+                if let Some(result) = eval_math_const(left_val, op, right_val) {
+                    let v_ref = arena.alloc_value(ArenaValueExpr::Literal(result));
+                    return Ok(arena.alloc_math(ArenaMathExpr::Primary(v_ref)));
+                }
+            }
             let left_ref = convert_math_expr(left, arena, resolver)?;
             let right_ref = convert_math_expr(right, arena, resolver)?;
             ArenaMathExpr::Binary {
@@ -659,7 +859,7 @@ fn literal_parser<'a>(
         Token::StringLiteral(s) => {
             let inner = &s[1..s.len()-1];
             let unescaped = inner.replace("\\\"", "\"").replace("\\\\", "\\");
-            Value::String(unescaped)
+            Value::string(unescaped)
         }
     };
 
@@ -688,14 +888,14 @@ fn literal_parser<'a>(
     let bytes_literal = select_ref! {
         Token::BytesLiteral(s) => {
             let hex = &s[2..];
-            let bytes = (0..hex.len())
+            let bytes: Vec<u8> = (0..hex.len())
                 .step_by(2)
                 .map(|i| {
                     let end = (i + 2).min(hex.len());
                     u8::from_str_radix(&hex[i..end], 16).unwrap_or(0)
                 })
                 .collect();
-            Value::Bytes(bytes)
+            Value::bytes(bytes)
         }
     };
 
@@ -1239,14 +1439,19 @@ fn evaluate_comparison(left: &Value, op: &CompOp, right: &Value) -> Result<bool>
 }
 
 // =====================================================================================================================
-/// Evaluate a path expression
 /// Evaluate a pre-resolved path - NO runtime lookup needed!
 #[inline]
 fn evaluate_resolved_path(path: &ResolvedPath, ctx: &EvalContext) -> Result<Value> {
-    // Direct call to pre-resolved accessor - no lookup!
+    // Direct call to pre-resolved accessor - no lookup, no clone!
     let value = path.accessor.get(ctx, &path.full_path)?;
 
-    let mut current = value.clone();
+    // If no indexes, return directly without any allocation
+    if path.indexes.is_empty() {
+        return Ok(value);
+    }
+
+    // Apply indexes
+    let mut current = value;
     for index in &path.indexes {
         current = apply_index(&current, index)?;
     }
@@ -1283,7 +1488,7 @@ fn apply_index(value: &Value, index: &IndexExpr) -> Result<Value> {
             };
             s.chars()
                 .nth(idx)
-                .map(|c| Value::String(c.to_string()))
+                .map(|c| Value::string(c.to_string()))
                 .ok_or_else(|| format!("Index {} out of bounds", i).into())
         }
         _ => Err(format!("Cannot index {:?} with {:?}", value, index).into()),
@@ -1349,7 +1554,7 @@ fn evaluate_math_op(left: &Value, op: &MathOp, right: &Value) -> Result<Value> {
             }
         }
         (Value::String(l), Value::String(r)) if matches!(op, MathOp::Add) => {
-            Ok(Value::String(format!("{}{}", l, r)))
+            Ok(Value::string(format!("{}{}", l, r)))
         }
         _ => Err(format!(
             "Cannot perform math operation on {:?} and {:?}",
@@ -1363,6 +1568,67 @@ fn evaluate_math_op(left: &Value, op: &MathOp, right: &Value) -> Result<Value> {
 // =====================================================================================================================
 // Arena-based AST Evaluation (cache-friendly traversal, NO runtime path lookup!)
 // =====================================================================================================================
+
+/// Zero-allocation argument evaluator for function calls.
+/// Implements lazy evaluation - arguments are only evaluated when requested.
+struct ArenaArgs<'a> {
+    arena: &'a AstArena,
+    args: &'a [ArenaArgExpr],
+    ctx: *mut EvalContext, // Raw pointer for interior mutability
+}
+
+impl<'a> ArenaArgs<'a> {
+    #[inline]
+    fn new(arena: &'a AstArena, args: &'a [ArenaArgExpr], ctx: &mut EvalContext) -> Self {
+        Self {
+            arena,
+            args,
+            ctx: ctx as *mut EvalContext,
+        }
+    }
+}
+
+impl<'a> Args for ArenaArgs<'a> {
+    #[inline]
+    fn ctx(&mut self) -> &mut EvalContext {
+        // SAFETY: We have exclusive access through the mutable reference in `new`,
+        // and ArenaArgs is never shared or cloned.
+        unsafe { &mut *self.ctx }
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.args.len()
+    }
+
+    #[inline]
+    fn get(&mut self, index: usize) -> Result<Value> {
+        if index >= self.args.len() {
+            return Err(format!("Argument index {} out of bounds", index).into());
+        }
+
+        // SAFETY: We have exclusive access, same as ctx()
+        let ctx = unsafe { &mut *self.ctx };
+
+        match &self.args[index] {
+            ArenaArgExpr::Positional(value_ref) => {
+                arena_evaluate_value_expr(*value_ref, self.arena, ctx)
+            }
+            ArenaArgExpr::Named { value, .. } => arena_evaluate_value_expr(*value, self.arena, ctx),
+        }
+    }
+
+    #[inline]
+    fn name(&self, index: usize) -> Option<&str> {
+        if index >= self.args.len() {
+            return None;
+        }
+        match &self.args[index] {
+            ArenaArgExpr::Positional(_) => None,
+            ArenaArgExpr::Named { name, .. } => Some(name),
+        }
+    }
+}
 
 /// Evaluate the arena-based root expression
 /// Note: resolver is NOT used at runtime - paths are pre-resolved at parse time!
@@ -1477,8 +1743,8 @@ fn arena_evaluate_value_expr(
     }
 }
 
-/// Evaluate an arena-based function call
-/// Uses SmallVec to avoid heap allocation for functions with ≤4 arguments
+/// Evaluate an arena-based function call  
+/// ZERO ALLOCATION - uses lazy ArenaArgs for argument evaluation
 #[inline]
 fn arena_evaluate_function_call(
     fc_ref: FunctionCallRef,
@@ -1487,33 +1753,16 @@ fn arena_evaluate_function_call(
 ) -> Result<Value> {
     let fc = arena.get_func(fc_ref);
 
-    // Use SmallVec to avoid heap allocation for most function calls (≤4 args)
-    let mut args: ArgsVec = SmallVec::with_capacity(fc.args.len());
-
-    for arg_expr in &fc.args {
-        let arg = match arg_expr {
-            ArenaArgExpr::Positional(value_ref) => {
-                let value = arena_evaluate_value_expr(*value_ref, arena, ctx)?;
-                Argument::Positional(value)
-            }
-            ArenaArgExpr::Named { name, value } => {
-                let evaluated = arena_evaluate_value_expr(*value, arena, ctx)?;
-                Argument::Named {
-                    name: name.clone(),
-                    value: evaluated,
-                }
-            }
-        };
-        args.push(arg);
-    }
-
     let callback = fc
         .callback
         .as_ref()
         .ok_or_else(|| -> BoxError { format!("Unknown function: {}", fc.name).into() })?;
 
-    // Pass slice to callback - no ownership transfer needed
-    let result = callback(ctx, &args)?;
+    // ZERO ALLOCATION: Create lazy args evaluator
+    let mut args = ArenaArgs::new(arena, &fc.args, ctx);
+
+    // Callback uses lazy evaluation - only requested args are computed
+    let result = callback(&mut args)?;
 
     let mut current = result;
     for index in &fc.indexes {

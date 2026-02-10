@@ -66,7 +66,6 @@ pub enum Value {
     /// 64-bit floating point
     Float(f64),
     /// String value
-    /// AZH: TODO: consider to use Arc for reference counting in case of cloning and not making full copy with going to heap, locks, etc.
     String(String),
     /// Bytes literal (e.g., 0xC0FFEE)
     Bytes(Vec<u8>),

@@ -12,11 +12,177 @@ use super::{
 };
 
 // =====================================================================================================================
-// AST Node Types
+// Arena-based AST Types
+// =====================================================================================================================
+
+/// Index into the arena for BoolExpr nodes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoolExprRef(u32);
+
+/// Index into the arena for MathExpr nodes  
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MathExprRef(u32);
+
+/// Index into the arena for ValueExpr nodes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValueExprRef(u32);
+
+/// Index into the arena for FunctionCall nodes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionCallRef(u32);
+
+/// Arena storage for all AST nodes - enables cache-friendly traversal
+#[derive(Debug, Clone, Default)]
+pub struct AstArena {
+    pub bool_exprs: Vec<ArenaBoolExpr>,
+    pub math_exprs: Vec<ArenaMathExpr>,
+    pub value_exprs: Vec<ArenaValueExpr>,
+    pub function_calls: Vec<ArenaFunctionCall>,
+}
+
+impl AstArena {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn alloc_bool(&mut self, expr: ArenaBoolExpr) -> BoolExprRef {
+        let idx = self.bool_exprs.len() as u32;
+        self.bool_exprs.push(expr);
+        BoolExprRef(idx)
+    }
+
+    #[inline]
+    pub fn alloc_math(&mut self, expr: ArenaMathExpr) -> MathExprRef {
+        let idx = self.math_exprs.len() as u32;
+        self.math_exprs.push(expr);
+        MathExprRef(idx)
+    }
+
+    #[inline]
+    pub fn alloc_value(&mut self, expr: ArenaValueExpr) -> ValueExprRef {
+        let idx = self.value_exprs.len() as u32;
+        self.value_exprs.push(expr);
+        ValueExprRef(idx)
+    }
+
+    #[inline]
+    pub fn alloc_func(&mut self, call: ArenaFunctionCall) -> FunctionCallRef {
+        let idx = self.function_calls.len() as u32;
+        self.function_calls.push(call);
+        FunctionCallRef(idx)
+    }
+
+    #[inline]
+    pub fn get_bool(&self, r: BoolExprRef) -> &ArenaBoolExpr {
+        &self.bool_exprs[r.0 as usize]
+    }
+
+    #[inline]
+    pub fn get_math(&self, r: MathExprRef) -> &ArenaMathExpr {
+        &self.math_exprs[r.0 as usize]
+    }
+
+    #[inline]
+    pub fn get_value(&self, r: ValueExprRef) -> &ArenaValueExpr {
+        &self.value_exprs[r.0 as usize]
+    }
+
+    #[inline]
+    pub fn get_func(&self, r: FunctionCallRef) -> &ArenaFunctionCall {
+        &self.function_calls[r.0 as usize]
+    }
+}
+
+/// Arena-based BoolExpr using indices instead of Box
+#[derive(Debug, Clone)]
+pub enum ArenaBoolExpr {
+    Literal(bool),
+    Comparison {
+        left: ValueExprRef,
+        op: CompOp,
+        right: ValueExprRef,
+    },
+    Converter(FunctionCallRef),
+    Path(PathExpr),
+    Not(BoolExprRef),
+    And(BoolExprRef, BoolExprRef),
+    Or(BoolExprRef, BoolExprRef),
+}
+
+/// Arena-based MathExpr using indices instead of Box
+#[derive(Debug, Clone)]
+pub enum ArenaMathExpr {
+    Primary(ValueExprRef),
+    Negate(MathExprRef),
+    Binary {
+        left: MathExprRef,
+        op: MathOp,
+        right: MathExprRef,
+    },
+}
+
+/// Arena-based ValueExpr using indices instead of Box
+#[derive(Debug, Clone)]
+pub enum ArenaValueExpr {
+    Literal(Value),
+    Path(PathExpr),
+    List(Vec<ValueExprRef>),
+    Map(Vec<(String, ValueExprRef)>),
+    FunctionCall(FunctionCallRef),
+    Math(MathExprRef),
+}
+
+/// Arena-based FunctionCall using indices for args
+#[derive(Clone)]
+pub struct ArenaFunctionCall {
+    pub name: String,
+    pub is_editor: bool,
+    pub args: Vec<ArenaArgExpr>,
+    pub indexes: Vec<IndexExpr>,
+    pub callback: Option<CallbackFn>,
+}
+
+impl std::fmt::Debug for ArenaFunctionCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArenaFunctionCall")
+            .field("name", &self.name)
+            .field("is_editor", &self.is_editor)
+            .field("args", &self.args)
+            .field("indexes", &self.indexes)
+            .field("callback", &self.callback.is_some())
+            .finish()
+    }
+}
+
+/// Arena-based ArgExpr
+#[derive(Debug, Clone)]
+pub enum ArenaArgExpr {
+    Positional(ValueExprRef),
+    Named { name: String, value: ValueExprRef },
+}
+
+/// Arena-based EditorStatement
+#[derive(Debug, Clone)]
+pub struct ArenaEditorStatement {
+    pub editor: FunctionCallRef,
+    pub condition: Option<BoolExprRef>,
+}
+
+/// Arena-based root expression
+#[derive(Debug, Clone)]
+pub enum ArenaRootExpr {
+    EditorStatement(ArenaEditorStatement),
+    BooleanExpression(BoolExprRef),
+    MathExpression(MathExprRef),
+}
+
+// =====================================================================================================================
+// Original AST Node Types (used during parsing, then converted to arena)
 // =====================================================================================================================
 
 /// Comparison operators
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum CompOp {
     Eq,
     NotEq,
@@ -98,7 +264,7 @@ pub enum ValueExpr {
 }
 
 /// Combined math operator
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum MathOp {
     Add,
     Sub,
@@ -165,13 +331,149 @@ pub enum RootExpr {
 }
 
 // =====================================================================================================================
+// AST to Arena Conversion
+// =====================================================================================================================
+
+/// Convert boxed AST to arena-based AST for cache-friendly execution
+fn convert_to_arena(root: &RootExpr, arena: &mut AstArena) -> ArenaRootExpr {
+    match root {
+        RootExpr::EditorStatement(stmt) => {
+            let editor_ref = convert_function_call(&stmt.editor, arena);
+            let condition_ref = stmt.condition.as_ref().map(|c| convert_bool_expr(c, arena));
+            ArenaRootExpr::EditorStatement(ArenaEditorStatement {
+                editor: editor_ref,
+                condition: condition_ref,
+            })
+        }
+        RootExpr::BooleanExpression(expr) => {
+            let expr_ref = convert_bool_expr(expr, arena);
+            ArenaRootExpr::BooleanExpression(expr_ref)
+        }
+        RootExpr::MathExpression(expr) => {
+            let expr_ref = convert_math_expr(expr, arena);
+            ArenaRootExpr::MathExpression(expr_ref)
+        }
+    }
+}
+
+fn convert_bool_expr(expr: &BoolExpr, arena: &mut AstArena) -> BoolExprRef {
+    let arena_expr = match expr {
+        BoolExpr::Literal(b) => ArenaBoolExpr::Literal(*b),
+        BoolExpr::Comparison { left, op, right } => {
+            let left_ref = convert_value_expr(left, arena);
+            let right_ref = convert_value_expr(right, arena);
+            ArenaBoolExpr::Comparison {
+                left: left_ref,
+                op: *op,
+                right: right_ref,
+            }
+        }
+        BoolExpr::Converter(fc) => {
+            let fc_ref = convert_function_call(fc, arena);
+            ArenaBoolExpr::Converter(fc_ref)
+        }
+        BoolExpr::Path(path) => ArenaBoolExpr::Path(path.clone()),
+        BoolExpr::Not(inner) => {
+            let inner_ref = convert_bool_expr(inner, arena);
+            ArenaBoolExpr::Not(inner_ref)
+        }
+        BoolExpr::And(left, right) => {
+            let left_ref = convert_bool_expr(left, arena);
+            let right_ref = convert_bool_expr(right, arena);
+            ArenaBoolExpr::And(left_ref, right_ref)
+        }
+        BoolExpr::Or(left, right) => {
+            let left_ref = convert_bool_expr(left, arena);
+            let right_ref = convert_bool_expr(right, arena);
+            ArenaBoolExpr::Or(left_ref, right_ref)
+        }
+    };
+    arena.alloc_bool(arena_expr)
+}
+
+fn convert_math_expr(expr: &MathExpr, arena: &mut AstArena) -> MathExprRef {
+    let arena_expr = match expr {
+        MathExpr::Primary(v) => {
+            let v_ref = convert_value_expr(v, arena);
+            ArenaMathExpr::Primary(v_ref)
+        }
+        MathExpr::Negate(inner) => {
+            let inner_ref = convert_math_expr(inner, arena);
+            ArenaMathExpr::Negate(inner_ref)
+        }
+        MathExpr::Binary { left, op, right } => {
+            let left_ref = convert_math_expr(left, arena);
+            let right_ref = convert_math_expr(right, arena);
+            ArenaMathExpr::Binary {
+                left: left_ref,
+                op: *op,
+                right: right_ref,
+            }
+        }
+    };
+    arena.alloc_math(arena_expr)
+}
+
+fn convert_value_expr(expr: &ValueExpr, arena: &mut AstArena) -> ValueExprRef {
+    let arena_expr = match expr {
+        ValueExpr::Literal(v) => ArenaValueExpr::Literal(v.clone()),
+        ValueExpr::Path(p) => ArenaValueExpr::Path(p.clone()),
+        ValueExpr::List(items) => {
+            let refs: Vec<_> = items.iter().map(|i| convert_value_expr(i, arena)).collect();
+            ArenaValueExpr::List(refs)
+        }
+        ValueExpr::Map(entries) => {
+            let refs: Vec<_> = entries
+                .iter()
+                .map(|(k, v)| (k.clone(), convert_value_expr(v, arena)))
+                .collect();
+            ArenaValueExpr::Map(refs)
+        }
+        ValueExpr::FunctionCall(fc) => {
+            let fc_ref = convert_function_call(fc, arena);
+            ArenaValueExpr::FunctionCall(fc_ref)
+        }
+        ValueExpr::Math(m) => {
+            let m_ref = convert_math_expr(m, arena);
+            ArenaValueExpr::Math(m_ref)
+        }
+    };
+    arena.alloc_value(arena_expr)
+}
+
+fn convert_function_call(fc: &FunctionCall, arena: &mut AstArena) -> FunctionCallRef {
+    let args: Vec<_> = fc
+        .args
+        .iter()
+        .map(|arg| match arg {
+            ArgExpr::Positional(v) => ArenaArgExpr::Positional(convert_value_expr(v, arena)),
+            ArgExpr::Named { name, value } => ArenaArgExpr::Named {
+                name: name.clone(),
+                value: convert_value_expr(value, arena),
+            },
+        })
+        .collect();
+
+    let arena_fc = ArenaFunctionCall {
+        name: fc.name.clone(),
+        is_editor: fc.is_editor,
+        args,
+        indexes: fc.indexes.clone(),
+        callback: fc.callback.clone(),
+    };
+    arena.alloc_func(arena_fc)
+}
+
+// =====================================================================================================================
 // Parser Implementation
 // =====================================================================================================================
 
 /// OTTL Parser that parses input strings and produces executable objects.
 pub struct Parser {
-    /// Parsed AST
-    ast: Option<RootExpr>,
+    /// Arena-based AST for cache-friendly execution
+    arena: AstArena,
+    /// Arena-based root expression
+    arena_root: Option<ArenaRootExpr>,
     /// Parsing errors
     errors: Vec<String>,
     /// Path resolver for reading/writing paths
@@ -188,7 +490,8 @@ impl Parser {
         expression: &str,
     ) -> Self {
         let mut parser = Parser {
-            ast: None,
+            arena: AstArena::new(),
+            arena_root: None,
             errors: Vec::new(),
             path_resolver: path_resolver_cb.clone(),
         };
@@ -218,7 +521,9 @@ impl Parser {
 
         match result.into_result() {
             Ok(ast) => {
-                parser.ast = Some(ast);
+                // Convert to arena-based AST for cache-friendly execution
+                let arena_root = convert_to_arena(&ast, &mut parser.arena);
+                parser.arena_root = Some(arena_root);
             }
             Err(errs) => {
                 for err in errs {
@@ -242,12 +547,12 @@ impl OttlParser for Parser {
     }
 
     fn execute(&self, ctx: &mut EvalContext) -> Result<Value> {
-        let ast = self
-            .ast
+        let arena_root = self
+            .arena_root
             .as_ref()
             .ok_or_else(|| -> BoxError { "No AST available (parsing failed)".into() })?;
 
-        evaluate_root(ast, ctx, &self.path_resolver)
+        arena_evaluate_root(arena_root, &self.arena, ctx, &self.path_resolver)
     }
 }
 
@@ -749,81 +1054,8 @@ fn build_parser<'a>(
 }
 
 // =====================================================================================================================
-// AST Evaluation
+// AST Evaluation Helpers
 // =====================================================================================================================
-/// Evaluate the root expression
-fn evaluate_root(root: &RootExpr, ctx: &mut EvalContext, resolver: &PathResolver) -> Result<Value> {
-    match root {
-        //most probable case ...
-        RootExpr::EditorStatement(stmt) => {
-            let should_execute = if let Some(ref cond) = stmt.condition {
-                evaluate_bool_expr(cond, ctx, resolver)?
-            } else {
-                true
-            };
-
-            if should_execute {
-                evaluate_function_call(&stmt.editor, ctx, resolver)?;
-            }
-
-            Ok(Value::Nil)
-        }
-        RootExpr::BooleanExpression(expr) => {
-            let result = evaluate_bool_expr(expr, ctx, resolver)?;
-            Ok(Value::Bool(result))
-        }
-        RootExpr::MathExpression(expr) => evaluate_math_expr(expr, ctx, resolver),
-    }
-}
-
-// =====================================================================================================================
-/// Evaluate a boolean expression
-fn evaluate_bool_expr(
-    expr: &BoolExpr,
-    ctx: &mut EvalContext,
-    resolver: &PathResolver,
-) -> Result<bool> {
-    match expr {
-        BoolExpr::Literal(b) => Ok(*b),
-        BoolExpr::Comparison { left, op, right } => {
-            let left_val = evaluate_value_expr(left, ctx, resolver)?;
-            let right_val = evaluate_value_expr(right, ctx, resolver)?;
-            evaluate_comparison(&left_val, op, &right_val)
-        }
-        BoolExpr::Converter(fc) => {
-            let result = evaluate_function_call(fc, ctx, resolver)?;
-            match result {
-                Value::Bool(b) => Ok(b),
-                _ => Err("Converter did not return a boolean".into()),
-            }
-        }
-        BoolExpr::Path(path) => {
-            let value = evaluate_path(path, ctx, resolver)?;
-            match value {
-                Value::Bool(b) => Ok(b),
-                _ => Err("Path did not return a boolean".into()),
-            }
-        }
-        BoolExpr::Not(inner) => {
-            let result = evaluate_bool_expr(inner, ctx, resolver)?;
-            Ok(!result)
-        }
-        BoolExpr::And(left, right) => {
-            let left_result = evaluate_bool_expr(left, ctx, resolver)?;
-            if !left_result {
-                return Ok(false);
-            }
-            evaluate_bool_expr(right, ctx, resolver)
-        }
-        BoolExpr::Or(left, right) => {
-            let left_result = evaluate_bool_expr(left, ctx, resolver)?;
-            if left_result {
-                return Ok(true);
-            }
-            evaluate_bool_expr(right, ctx, resolver)
-        }
-    }
-}
 
 // =====================================================================================================================
 /// Evaluate a comparison
@@ -926,36 +1158,6 @@ fn evaluate_comparison(left: &Value, op: &CompOp, right: &Value) -> Result<bool>
 }
 
 // =====================================================================================================================
-/// Evaluate a value expression
-fn evaluate_value_expr(
-    expr: &ValueExpr,
-    ctx: &mut EvalContext,
-    resolver: &PathResolver,
-) -> Result<Value> {
-    match expr {
-        ValueExpr::Literal(v) => Ok(v.clone()),
-        ValueExpr::Path(path) => evaluate_path(path, ctx, resolver),
-        ValueExpr::List(items) => {
-            let values: Result<Vec<Value>> = items
-                .iter()
-                .map(|item| evaluate_value_expr(item, ctx, resolver))
-                .collect();
-            Ok(Value::List(values?))
-        }
-        ValueExpr::Map(entries) => {
-            let mut map = std::collections::HashMap::new();
-            for (key, value_expr) in entries {
-                let value = evaluate_value_expr(value_expr, ctx, resolver)?;
-                map.insert(key.clone(), value);
-            }
-            Ok(Value::Map(map))
-        }
-        ValueExpr::FunctionCall(fc) => evaluate_function_call(fc, ctx, resolver),
-        ValueExpr::Math(math) => evaluate_math_expr(math, ctx, resolver),
-    }
-}
-
-// =====================================================================================================================
 /// Evaluate a path expression
 fn evaluate_path(path: &PathExpr, ctx: &mut EvalContext, resolver: &PathResolver) -> Result<Value> {
     let path_str = path.segments.join(".");
@@ -1003,71 +1205,6 @@ fn apply_index(value: &Value, index: &IndexExpr) -> Result<Value> {
                 .ok_or_else(|| format!("Index {} out of bounds", i).into())
         }
         _ => Err(format!("Cannot index {:?} with {:?}", value, index).into()),
-    }
-}
-
-// =====================================================================================================================
-/// Evaluate a function call
-fn evaluate_function_call(
-    fc: &FunctionCall,
-    ctx: &mut EvalContext,
-    resolver: &PathResolver,
-) -> Result<Value> {
-    let mut args = Vec::new();
-    for arg_expr in &fc.args {
-        let arg = match arg_expr {
-            ArgExpr::Positional(value_expr) => {
-                let value = evaluate_value_expr(value_expr, ctx, resolver)?;
-                Argument::Positional(value)
-            }
-            ArgExpr::Named { name, value } => {
-                let evaluated = evaluate_value_expr(value, ctx, resolver)?;
-                Argument::Named {
-                    name: name.clone(),
-                    value: evaluated,
-                }
-            }
-        };
-        args.push(arg);
-    }
-
-    let callback = fc
-        .callback
-        .as_ref()
-        .ok_or_else(|| -> BoxError { format!("Unknown function: {}", fc.name).into() })?;
-
-    let result = callback(ctx, args)?;
-
-    let mut current = result;
-    for index in &fc.indexes {
-        current = apply_index(&current, index)?;
-    }
-
-    Ok(current)
-}
-
-// =====================================================================================================================
-/// Evaluate a math expression
-fn evaluate_math_expr(
-    expr: &MathExpr,
-    ctx: &mut EvalContext,
-    resolver: &PathResolver,
-) -> Result<Value> {
-    match expr {
-        MathExpr::Primary(value_expr) => evaluate_value_expr(value_expr, ctx, resolver),
-        MathExpr::Negate(inner) => {
-            let value = evaluate_math_expr(inner, ctx, resolver)?;
-            match value {
-                Value::Int(i) => Ok(Value::Int(-i)),
-                Value::Float(f) => Ok(Value::Float(-f)),
-                _ => Err("Cannot negate non-numeric value".into()),
-            }
-        }
-        MathExpr::Binary { left, op, right } => {
-            let left_val = evaluate_math_expr(left, ctx, resolver)?;
-            let right_val = evaluate_math_expr(right, ctx, resolver)?;
-            evaluate_math_op(&left_val, op, &right_val)
-        }
     }
 }
 
@@ -1138,5 +1275,199 @@ fn evaluate_math_op(left: &Value, op: &MathOp, right: &Value) -> Result<Value> {
             std::mem::discriminant(right)
         )
         .into()),
+    }
+}
+
+// =====================================================================================================================
+// Arena-based AST Evaluation (cache-friendly traversal)
+// =====================================================================================================================
+
+/// Evaluate the arena-based root expression
+#[inline]
+fn arena_evaluate_root(
+    root: &ArenaRootExpr,
+    arena: &AstArena,
+    ctx: &mut EvalContext,
+    resolver: &PathResolver,
+) -> Result<Value> {
+    match root {
+        ArenaRootExpr::EditorStatement(stmt) => {
+            let should_execute = if let Some(cond_ref) = stmt.condition {
+                arena_evaluate_bool_expr(cond_ref, arena, ctx, resolver)?
+            } else {
+                true
+            };
+
+            if should_execute {
+                arena_evaluate_function_call(stmt.editor, arena, ctx, resolver)?;
+            }
+
+            Ok(Value::Nil)
+        }
+        ArenaRootExpr::BooleanExpression(expr_ref) => {
+            let result = arena_evaluate_bool_expr(*expr_ref, arena, ctx, resolver)?;
+            Ok(Value::Bool(result))
+        }
+        ArenaRootExpr::MathExpression(expr_ref) => {
+            arena_evaluate_math_expr(*expr_ref, arena, ctx, resolver)
+        }
+    }
+}
+
+/// Evaluate an arena-based boolean expression
+#[inline]
+fn arena_evaluate_bool_expr(
+    expr_ref: BoolExprRef,
+    arena: &AstArena,
+    ctx: &mut EvalContext,
+    resolver: &PathResolver,
+) -> Result<bool> {
+    match arena.get_bool(expr_ref) {
+        ArenaBoolExpr::Literal(b) => Ok(*b),
+        ArenaBoolExpr::Comparison { left, op, right } => {
+            let left_val = arena_evaluate_value_expr(*left, arena, ctx, resolver)?;
+            let right_val = arena_evaluate_value_expr(*right, arena, ctx, resolver)?;
+            evaluate_comparison(&left_val, op, &right_val)
+        }
+        ArenaBoolExpr::Converter(fc_ref) => {
+            let result = arena_evaluate_function_call(*fc_ref, arena, ctx, resolver)?;
+            match result {
+                Value::Bool(b) => Ok(b),
+                _ => Err("Converter did not return a boolean".into()),
+            }
+        }
+        ArenaBoolExpr::Path(path) => {
+            let value = evaluate_path(path, ctx, resolver)?;
+            match value {
+                Value::Bool(b) => Ok(b),
+                _ => Err("Path did not return a boolean".into()),
+            }
+        }
+        ArenaBoolExpr::Not(inner_ref) => {
+            let result = arena_evaluate_bool_expr(*inner_ref, arena, ctx, resolver)?;
+            Ok(!result)
+        }
+        ArenaBoolExpr::And(left_ref, right_ref) => {
+            let left_result = arena_evaluate_bool_expr(*left_ref, arena, ctx, resolver)?;
+            if !left_result {
+                return Ok(false);
+            }
+            arena_evaluate_bool_expr(*right_ref, arena, ctx, resolver)
+        }
+        ArenaBoolExpr::Or(left_ref, right_ref) => {
+            let left_result = arena_evaluate_bool_expr(*left_ref, arena, ctx, resolver)?;
+            if left_result {
+                return Ok(true);
+            }
+            arena_evaluate_bool_expr(*right_ref, arena, ctx, resolver)
+        }
+    }
+}
+
+/// Evaluate an arena-based value expression
+#[inline]
+fn arena_evaluate_value_expr(
+    expr_ref: ValueExprRef,
+    arena: &AstArena,
+    ctx: &mut EvalContext,
+    resolver: &PathResolver,
+) -> Result<Value> {
+    match arena.get_value(expr_ref) {
+        ArenaValueExpr::Literal(v) => Ok(v.clone()),
+        ArenaValueExpr::Path(path) => evaluate_path(path, ctx, resolver),
+        ArenaValueExpr::List(items) => {
+            let values: Result<Vec<Value>> = items
+                .iter()
+                .map(|item_ref| arena_evaluate_value_expr(*item_ref, arena, ctx, resolver))
+                .collect();
+            Ok(Value::List(values?))
+        }
+        ArenaValueExpr::Map(entries) => {
+            let mut map = std::collections::HashMap::new();
+            for (key, value_ref) in entries {
+                let value = arena_evaluate_value_expr(*value_ref, arena, ctx, resolver)?;
+                map.insert(key.clone(), value);
+            }
+            Ok(Value::Map(map))
+        }
+        ArenaValueExpr::FunctionCall(fc_ref) => {
+            arena_evaluate_function_call(*fc_ref, arena, ctx, resolver)
+        }
+        ArenaValueExpr::Math(math_ref) => arena_evaluate_math_expr(*math_ref, arena, ctx, resolver),
+    }
+}
+
+/// Evaluate an arena-based function call
+#[inline]
+fn arena_evaluate_function_call(
+    fc_ref: FunctionCallRef,
+    arena: &AstArena,
+    ctx: &mut EvalContext,
+    resolver: &PathResolver,
+) -> Result<Value> {
+    let fc = arena.get_func(fc_ref);
+    let mut args = Vec::with_capacity(fc.args.len());
+
+    for arg_expr in &fc.args {
+        let arg = match arg_expr {
+            ArenaArgExpr::Positional(value_ref) => {
+                let value = arena_evaluate_value_expr(*value_ref, arena, ctx, resolver)?;
+                Argument::Positional(value)
+            }
+            ArenaArgExpr::Named { name, value } => {
+                let evaluated = arena_evaluate_value_expr(*value, arena, ctx, resolver)?;
+                Argument::Named {
+                    name: name.clone(),
+                    value: evaluated,
+                }
+            }
+        };
+        args.push(arg);
+    }
+
+    let callback = fc
+        .callback
+        .as_ref()
+        .ok_or_else(|| -> BoxError { format!("Unknown function: {}", fc.name).into() })?;
+
+    let result = callback(ctx, args)?;
+
+    let mut current = result;
+    for index in &fc.indexes {
+        current = apply_index(&current, index)?;
+    }
+
+    Ok(current)
+}
+
+/// Evaluate an arena-based math expression
+#[inline]
+fn arena_evaluate_math_expr(
+    expr_ref: MathExprRef,
+    arena: &AstArena,
+    ctx: &mut EvalContext,
+    resolver: &PathResolver,
+) -> Result<Value> {
+    match arena.get_math(expr_ref) {
+        ArenaMathExpr::Primary(value_ref) => {
+            arena_evaluate_value_expr(*value_ref, arena, ctx, resolver)
+        }
+        ArenaMathExpr::Negate(inner_ref) => {
+            let value = arena_evaluate_math_expr(*inner_ref, arena, ctx, resolver)?;
+            match value {
+                Value::Int(i) => Ok(Value::Int(-i)),
+                Value::Float(f) => Ok(Value::Float(-f)),
+                _ => Err("Cannot negate non-numeric value".into()),
+            }
+        }
+        ArenaMathExpr::Binary {
+            left: left_ref,
+            op,
+            right: right_ref,
+        } => {
+            let left_val = arena_evaluate_math_expr(*left_ref, arena, ctx, resolver)?;
+            let right_val = arena_evaluate_math_expr(*right_ref, arena, ctx, resolver)?;
+            evaluate_math_op(&left_val, op, &right_val)
+        }
     }
 }

@@ -1,3 +1,5 @@
 >>Basic tests:
 make fast-edit-test
 make fmt check-all 
+
+cargo test bench_execute_complex_realistic --release -- --ignored --nocapture

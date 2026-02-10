@@ -1096,12 +1096,10 @@ fn test_editor_set_list_of_maps() {
     // Double converter: Double(x) -> x * 2
     converters.insert(
         "Double".to_string(),
-        Arc::new(|args: &mut dyn crate::Args| {
-            match args.get(0)? {
-                Value::Int(v) => Ok(Value::Int(v * 2)),
-                Value::Float(v) => Ok(Value::Float(v * 2.0)),
-                _ => Err("Double: argument must be numeric".into()),
-            }
+        Arc::new(|args: &mut dyn crate::Args| match args.get(0)? {
+            Value::Int(v) => Ok(Value::Int(v * 2)),
+            Value::Float(v) => Ok(Value::Float(v * 2.0)),
+            _ => Err("Double: argument must be numeric".into()),
         }),
     );
 
@@ -1280,7 +1278,10 @@ fn test_converter_with_index() {
                 Value::String(s) => s,
                 _ => return Err("Split second argument must be string".into()),
             };
-            let parts: Vec<Value> = text.split(delimiter.as_ref()).map(|s| Value::string(s)).collect();
+            let parts: Vec<Value> = text
+                .split(delimiter.as_ref())
+                .map(|s| Value::string(s))
+                .collect();
             Ok(Value::List(parts))
         }),
     );
@@ -1325,12 +1326,8 @@ fn test_named_arguments() {
         "Convert".to_string(),
         Arc::new(|args: &mut dyn crate::Args| {
             // Find arguments by name or positional fallback
-            let value_val = args
-                .get_named("value")
-                .unwrap_or_else(|| args.get(0))?;
-            let format_val = args
-                .get_named("format")
-                .unwrap_or_else(|| args.get(1))?;
+            let value_val = args.get_named("value").unwrap_or_else(|| args.get(0))?;
+            let format_val = args.get_named("format").unwrap_or_else(|| args.get(1))?;
 
             let value = match value_val {
                 Value::Int(n) => n,
@@ -1861,9 +1858,7 @@ fn test_runtime_error_index_out_of_bounds() {
     // Register a converter that returns a small list
     converters.insert(
         "GetList".to_string(),
-        Arc::new(|_args: &mut dyn crate::Args| {
-            Ok(Value::List(vec![Value::Int(1), Value::Int(2)]))
-        }),
+        Arc::new(|_args: &mut dyn crate::Args| Ok(Value::List(vec![Value::Int(1), Value::Int(2)]))),
     );
 
     let enums = EnumMap::new();
@@ -2133,12 +2128,10 @@ fn bench_execute_with_converters() {
     // Converter that returns length
     converters.insert(
         "Len".to_string(),
-        Arc::new(|args: &mut dyn crate::Args| {
-            match args.get(0).ok() {
-                Some(Value::String(s)) => Ok(Value::Int(s.len() as i64)),
-                Some(Value::List(l)) => Ok(Value::Int(l.len() as i64)),
-                _ => Ok(Value::Int(0)),
-            }
+        Arc::new(|args: &mut dyn crate::Args| match args.get(0).ok() {
+            Some(Value::String(s)) => Ok(Value::Int(s.len() as i64)),
+            Some(Value::List(l)) => Ok(Value::Int(l.len() as i64)),
+            _ => Ok(Value::Int(0)),
         }),
     );
 

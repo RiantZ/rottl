@@ -557,7 +557,7 @@ fn test_parser_math_with_converters() {
     // Register Sum converter: Sum(a: int, b: int) -> int { a + b }
     converters.insert(
         "Sum".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
             let a = match args.first().map(|arg| arg.value()) {
                 Some(Value::Int(v)) => *v,
                 _ => return Err("Sum: first argument must be int".into()),
@@ -754,7 +754,7 @@ fn test_parser_enums_as_function_args() {
     // Register Sum converter: Sum(a: int, b: int) -> int { a + b }
     converters.insert(
         "Sum".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
             let a = match args.first().map(|arg| arg.value()) {
                 Some(Value::Int(v)) => *v,
                 _ => return Err("Sum: first argument must be int".into()),
@@ -770,7 +770,7 @@ fn test_parser_enums_as_function_args() {
     // Register Multiply converter: Multiply(a: int, b: int) -> int { a * b }
     converters.insert(
         "Multiply".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
             let a = match args.first().map(|arg| arg.value()) {
                 Some(Value::Int(v)) => *v,
                 _ => return Err("Multiply: first argument must be int".into()),
@@ -913,7 +913,7 @@ fn test_editor_executes_when_condition_true() {
     let mut editors = CallbackMap::new();
     editors.insert(
         "set".to_string(),
-        Arc::new(move |_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(move |_ctx: &mut EvalContext, args: &[Argument]| {
             let mut capture = capture_clone.lock().unwrap();
             capture.called = true;
             capture.first_arg = args.first().map(|a| a.value().clone());
@@ -926,7 +926,7 @@ fn test_editor_executes_when_condition_true() {
     // Sum converter: Sum(a, b) -> a + b
     converters.insert(
         "Sum".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
             let a = match args.first().map(|arg| arg.value()) {
                 Some(Value::Int(v)) => *v as f64,
                 Some(Value::Float(v)) => *v,
@@ -1001,7 +1001,7 @@ fn test_editor_not_executed_when_condition_false() {
     let mut editors = CallbackMap::new();
     editors.insert(
         "set".to_string(),
-        Arc::new(move |_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(move |_ctx: &mut EvalContext, args: &[Argument]| {
             let mut capture = capture_clone.lock().unwrap();
             capture.called = true;
             capture.first_arg = args.first().map(|a| a.value().clone());
@@ -1013,7 +1013,7 @@ fn test_editor_not_executed_when_condition_false() {
     let mut converters = CallbackMap::new();
     converters.insert(
         "Sum".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
             let a = match args.first().map(|arg| arg.value()) {
                 Some(Value::Int(v)) => *v as f64,
                 Some(Value::Float(v)) => *v,
@@ -1083,7 +1083,7 @@ fn test_editor_set_list_of_maps() {
     let mut editors = CallbackMap::new();
     editors.insert(
         "set".to_string(),
-        Arc::new(move |_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(move |_ctx: &mut EvalContext, args: &[Argument]| {
             let mut capture = capture_clone.lock().unwrap();
             capture.called = true;
             capture.first_arg = args.first().map(|a| a.value().clone());
@@ -1096,7 +1096,7 @@ fn test_editor_set_list_of_maps() {
     // Double converter: Double(x) -> x * 2
     converters.insert(
         "Double".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
             match args.first().map(|arg| arg.value()) {
                 Some(Value::Int(v)) => Ok(Value::Int(v * 2)),
                 Some(Value::Float(v)) => Ok(Value::Float(v * 2.0)),
@@ -1271,7 +1271,7 @@ fn test_converter_with_index() {
     // Split converter: splits string by delimiter, returns list
     converters.insert(
         "Split".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
             let text = match args.first().map(|arg| arg.value()) {
                 Some(Value::String(s)) => s.clone(),
                 _ => return Err("Split first argument must be string".into()),
@@ -1326,7 +1326,7 @@ fn test_named_arguments() {
     // Uses named arguments: value and format
     converters.insert(
         "Convert".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[Argument]| {
             // Find arguments by name
             let value_arg = args
                 .iter()
@@ -1569,7 +1569,7 @@ fn test_parser_error_missing_comma_in_function() {
     let mut editors = CallbackMap::new();
     editors.insert(
         "func".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: Vec<crate::Argument>| Ok(Value::Nil)),
+        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| Ok(Value::Nil)),
     );
     let converters = CallbackMap::new();
     let enums = EnumMap::new();
@@ -1868,7 +1868,7 @@ fn test_runtime_error_index_out_of_bounds() {
     // Register a converter that returns a small list
     converters.insert(
         "GetList".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: Vec<crate::Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| {
             Ok(Value::List(vec![Value::Int(1), Value::Int(2)]))
         }),
     );
@@ -1903,7 +1903,7 @@ fn test_runtime_error_negate_string() {
     // Register a converter that returns a string
     converters.insert(
         "GetString".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: Vec<crate::Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| {
             Ok(Value::String("hello".to_string()))
         }),
     );
@@ -1951,7 +1951,7 @@ fn test_runtime_error_key_not_found_in_map() {
     // Register a converter that returns a map
     converters.insert(
         "GetMap".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: Vec<crate::Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| {
             let mut map = std::collections::HashMap::new();
             map.insert("key1".to_string(), Value::Int(1));
             Ok(Value::Map(map))
@@ -2128,7 +2128,7 @@ fn bench_execute_with_converters() {
     // Simple converter that adds two numbers
     converters.insert(
         "Add".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<crate::Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[crate::Argument]| {
             let a = match args.first().map(|a| a.value()) {
                 Some(Value::Int(n)) => *n,
                 _ => 0,
@@ -2144,7 +2144,7 @@ fn bench_execute_with_converters() {
     // Converter that returns length
     converters.insert(
         "Len".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, args: Vec<crate::Argument>| {
+        Arc::new(|_ctx: &mut EvalContext, args: &[crate::Argument]| {
             match args.first().map(|a| a.value()) {
                 Some(Value::String(s)) => Ok(Value::Int(s.len() as i64)),
                 Some(Value::List(l)) => Ok(Value::Int(l.len() as i64)),
@@ -2173,7 +2173,7 @@ fn bench_execute_complex_realistic() {
     // set editor (does nothing in benchmark)
     editors.insert(
         "set".to_string(),
-        Arc::new(|_ctx: &mut EvalContext, _args: Vec<crate::Argument>| Ok(Value::Nil)),
+        Arc::new(|_ctx: &mut EvalContext, _args: &[crate::Argument]| Ok(Value::Nil)),
     );
 
     let mut enums = EnumMap::new();

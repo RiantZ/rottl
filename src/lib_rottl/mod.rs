@@ -149,8 +149,9 @@ pub type PathResolver =
 // =====================================================================================================================
 
 /// Callback function type for editors and converters.
-/// Takes a mutable context and a list of arguments, returns a Value or error.
-pub type CallbackFn = Arc<dyn Fn(&mut EvalContext, Vec<Argument>) -> Result<Value> + Send + Sync>;
+/// Takes a mutable context and a slice of arguments, returns a Value or error.
+/// Note: Uses slice (&[Argument]) instead of Vec for zero-allocation execution.
+pub type CallbackFn = Arc<dyn Fn(&mut EvalContext, &[Argument]) -> Result<Value> + Send + Sync>;
 
 /// Map of function names to their callback implementations.
 pub type CallbackMap = HashMap<String, CallbackFn>;

@@ -9,5 +9,6 @@ path = "src/lib_rottl/mod.rs"
 [dependencies]
 logos = "0.14"
 chumsky = "0.12"
+smallvec = "1.13"
 
 [dev-dependencies]

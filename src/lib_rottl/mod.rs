@@ -157,9 +157,8 @@ pub trait PathAccessor: fmt::Debug {
 }
 
 /// Type alias for the path resolver function.
-/// Takes a path string (e.g., "body.attributes.key") and returns a PathAccessor.
-pub type PathResolver =
-    Arc<dyn Fn(&str) -> Result<Arc<dyn PathAccessor + Send + Sync>> + Send + Sync>;
+/// Returns a PathAccessor.
+pub type PathResolver = Arc<dyn Fn() -> Result<Arc<dyn PathAccessor + Send + Sync>> + Send + Sync>;
 
 // =====================================================================================================================
 // Callback Types
@@ -195,6 +194,11 @@ pub trait Args {
         }
         None
     }
+
+    /// Set value at argument path by index.
+    /// The argument at `index` must be a path expression.
+    /// This calls PathAccessor::set on the resolved path.
+    fn set(&mut self, index: usize, value: &Value) -> Result<()>;
 }
 
 /// Callback function type for editors and converters.

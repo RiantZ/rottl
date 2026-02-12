@@ -82,7 +82,7 @@ impl AstArena {
 /// Helper to resolve a PathExpr to ResolvedPath at parse time
 fn resolve_path(path: &PathExpr, resolver: &PathResolver) -> Result<ResolvedPath> {
     let full_path = path.segments.join(".");
-    let accessor = resolver(&full_path)?;
+    let accessor = resolver()?;
     Ok(ResolvedPath {
         full_path,
         accessor,

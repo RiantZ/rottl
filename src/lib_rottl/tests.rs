@@ -414,11 +414,9 @@ impl PathAccessor for StubPathAccessor {
 
 /// Create a stub PathResolver that returns StubPathAccessor for any path
 fn stub_path_resolver() -> PathResolver {
-    Arc::new(
-        |_path: &str| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
-            Ok(Arc::new(StubPathAccessor))
-        },
-    )
+    Arc::new(|| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
+        Ok(Arc::new(StubPathAccessor))
+    })
 }
 
 /// Create a stub EvalContext
@@ -508,11 +506,7 @@ fn mock_path_resolver(bool_value: bool, int_value: i64) -> PathResolver {
         bool_value: Value::Bool(bool_value),
         int_value: Value::Int(int_value),
     });
-    Arc::new(
-        move |_path: &str| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
-            Ok(accessor.clone())
-        },
-    )
+    Arc::new(move || -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> { Ok(accessor.clone()) })
 }
 
 #[test]
@@ -894,7 +888,7 @@ fn tracking_path_resolver(
     });
     let accessor_clone = accessor.clone();
     let resolver: PathResolver = Arc::new(
-        move |_path: &str| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
+        move || -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
             Ok(accessor_clone.clone())
         },
     );
@@ -1223,7 +1217,7 @@ fn test_parser_path_expressions_comprehensive() {
     let accessor_clone = accessor.clone();
 
     let resolver: PathResolver = Arc::new(
-        move |_path: &str| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
+        move || -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
             Ok(accessor_clone.clone())
         },
     );
@@ -1829,8 +1823,7 @@ fn test_runtime_error_path_not_found() {
     let enums = EnumMap::new();
 
     // Create a resolver that always fails
-    let resolver: PathResolver =
-        Arc::new(|path: &str| Err(format!("Path not found: {}", path).into()));
+    let resolver: PathResolver = Arc::new(|| Err("Path resolver failed".into()));
 
     let mut ctx = stub_context();
 
@@ -1986,163 +1979,79 @@ fn test_runtime_error_bool_comparison_invalid_op() {
 // Performance Benchmarks (run with: cargo test bench_ -- --ignored --nocapture)
 // ============================================================================
 
+/// Creates a BenchPathAccessor for the given path
+fn create_bench_accessor() -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
+    Ok(Arc::new(BenchPathAccessor {}))
+}
+
+/// Benchmark context that stores path values
+#[derive(Debug)]
+struct BenchContext {
+    my_int_value: i64,
+    my_int_status: i64,
+    my_bool_enabled: bool,
+}
+
+impl BenchContext {
+    fn new() -> Self {
+        Self {
+            my_int_value: 42,
+            my_int_status: 200,
+            my_bool_enabled: true,
+        }
+    }
+}
+
+/// Creates a benchmark context with pre-initialized values
+fn bench_context() -> EvalContext {
+    Box::new(BenchContext::new())
+}
+
 /// Benchmark helper: creates a mock path resolver with configurable values
 fn bench_path_resolver() -> PathResolver {
-    Arc::new(
-        |path: &str| -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
-            Ok(Arc::new(BenchPathAccessor {
-                path: path.to_string(),
-            }))
-        },
-    )
+    Arc::new(create_bench_accessor)
 }
 
 #[derive(Debug)]
-struct BenchPathAccessor {
-    path: String,
-}
+struct BenchPathAccessor {}
 
 impl PathAccessor for BenchPathAccessor {
     #[inline]
-    fn get(&self, _ctx: &EvalContext, _path: &str) -> crate::Result<Value> {
-        // Return different values based on path pattern
-        // These are primitive types - essentially free to "copy"
-        if self.path.contains("int") || self.path.contains("count") || self.path.contains("status")
-        {
-            Ok(Value::Int(42))
-        } else if self.path.contains("bool") || self.path.contains("enabled") {
-            Ok(Value::Bool(true))
-        } else {
-            Ok(Value::Float(6.14))
+    fn get(&self, ctx: &EvalContext, path: &str) -> crate::Result<Value> {
+        if let Some(bench_ctx) = ctx.downcast_ref::<BenchContext>() {
+            match path {
+                "my.int.value" => return Ok(Value::Int(bench_ctx.my_int_value)),
+                "my.int.status" => return Ok(Value::Int(bench_ctx.my_int_status)),
+                "my.bool.enabled" => return Ok(Value::Bool(bench_ctx.my_bool_enabled)),
+                _ => {}
+            }
         }
+        Ok(Value::Nil)
     }
 
-    fn set(&self, _ctx: &mut EvalContext, _path: &str, _value: &Value) -> crate::Result<()> {
+    fn set(&self, ctx: &mut EvalContext, path: &str, value: &Value) -> crate::Result<()> {
+        if let Some(bench_ctx) = ctx.downcast_mut::<BenchContext>() {
+            match path {
+                "my.int.value" => {
+                    if let Value::Int(v) = value {
+                        bench_ctx.my_int_value = *v;
+                    }
+                }
+                "my.int.status" => {
+                    if let Value::Int(v) = value {
+                        bench_ctx.my_int_status = *v;
+                    }
+                }
+                "my.bool.enabled" => {
+                    if let Value::Bool(v) = value {
+                        bench_ctx.my_bool_enabled = *v;
+                    }
+                }
+                _ => {}
+            }
+        }
         Ok(())
     }
-}
-
-/// Benchmark: Simple math expression
-#[test]
-#[ignore]
-fn bench_execute_math_simple() {
-    let editors = CallbackMap::new();
-    let converters = CallbackMap::new();
-    let enums = EnumMap::new();
-    let resolver = bench_path_resolver();
-
-    let expression = "1 + 2 * 3 - 4 / 2";
-    let parser = Parser::new(&editors, &converters, &enums, &resolver, expression);
-    assert!(parser.is_error().is_ok(), "Parse failed");
-
-    run_benchmark("math_simple", &parser, 100_000);
-}
-
-/// Benchmark: Complex math expression with nested parentheses
-#[test]
-#[ignore]
-fn bench_execute_math_complex() {
-    let editors = CallbackMap::new();
-    let converters = CallbackMap::new();
-    let enums = EnumMap::new();
-    let resolver = bench_path_resolver();
-
-    let expression = "((1 + 2) * (3 + 4)) / ((5 - 2) * (6 - 4)) + (10 * (2 + 3))";
-    let parser = Parser::new(&editors, &converters, &enums, &resolver, expression);
-    assert!(parser.is_error().is_ok(), "Parse failed");
-
-    run_benchmark("math_complex", &parser, 100_000);
-}
-
-/// Benchmark: Boolean expression with comparisons
-#[test]
-#[ignore]
-fn bench_execute_bool_comparisons() {
-    let editors = CallbackMap::new();
-    let converters = CallbackMap::new();
-    let enums = EnumMap::new();
-    let resolver = bench_path_resolver();
-
-    let expression = "(1 < 2) and (3 > 1) or (5 == 5) and not (10 < 5)";
-    let parser = Parser::new(&editors, &converters, &enums, &resolver, expression);
-    assert!(parser.is_error().is_ok(), "Parse failed");
-
-    run_benchmark("bool_comparisons", &parser, 100_000);
-}
-
-/// Benchmark: Expression with path resolution
-#[test]
-#[ignore]
-fn bench_execute_with_paths() {
-    let editors = CallbackMap::new();
-    let converters = CallbackMap::new();
-    let enums = EnumMap::new();
-    let resolver = bench_path_resolver();
-
-    let expression = "my.int.value + other.int.count * 2 - third.float.value";
-    let parser = Parser::new(&editors, &converters, &enums, &resolver, expression);
-    assert!(parser.is_error().is_ok(), "Parse failed");
-
-    run_benchmark("with_paths", &parser, 100_000);
-}
-
-/// Benchmark: Boolean expression with paths
-#[test]
-#[ignore]
-fn bench_execute_bool_with_paths() {
-    let editors = CallbackMap::new();
-    let converters = CallbackMap::new();
-    let enums = EnumMap::new();
-    let resolver = bench_path_resolver();
-
-    let expression = "my.bool.enabled and (my.int.status > 0) or (other.int.count < 100)";
-    let parser = Parser::new(&editors, &converters, &enums, &resolver, expression);
-    assert!(parser.is_error().is_ok(), "Parse failed");
-
-    run_benchmark("bool_with_paths", &parser, 100_000);
-}
-
-/// Benchmark: Expression with converter calls
-#[test]
-#[ignore]
-fn bench_execute_with_converters() {
-    let editors = CallbackMap::new();
-    let mut converters = CallbackMap::new();
-
-    // Simple converter that adds two numbers
-    converters.insert(
-        "Add".to_string(),
-        Arc::new(|args: &mut dyn crate::Args| {
-            let a = match args.get(0).ok() {
-                Some(Value::Int(n)) => n,
-                _ => 0,
-            };
-            let b = match args.get(1).ok() {
-                Some(Value::Int(n)) => n,
-                _ => 0,
-            };
-            Ok(Value::Int(a + b))
-        }),
-    );
-
-    // Converter that returns length
-    converters.insert(
-        "Len".to_string(),
-        Arc::new(|args: &mut dyn crate::Args| match args.get(0).ok() {
-            Some(Value::String(s)) => Ok(Value::Int(s.len() as i64)),
-            Some(Value::List(l)) => Ok(Value::Int(l.len() as i64)),
-            _ => Ok(Value::Int(0)),
-        }),
-    );
-
-    let enums = EnumMap::new();
-    let resolver = bench_path_resolver();
-
-    let expression = "Add(1, 2) + Add(3, 4) * Add(5, 6)";
-    let parser = Parser::new(&editors, &converters, &enums, &resolver, expression);
-    assert!(parser.is_error().is_ok(), "Parse failed");
-
-    run_benchmark("with_converters", &parser, 100_000);
 }
 
 /// Benchmark: Complex real-world-like expression
@@ -2155,7 +2064,11 @@ fn bench_execute_complex_realistic() {
     // set editor (does nothing in benchmark)
     editors.insert(
         "set".to_string(),
-        Arc::new(|_args: &mut dyn crate::Args| Ok(Value::Nil)),
+        Arc::new(|args: &mut dyn crate::Args| {
+            let value = args.get(1)?;
+            args.set(0, &value)?;
+            Ok(Value::Nil)
+        }),
     );
 
     let mut enums = EnumMap::new();
@@ -2164,65 +2077,25 @@ fn bench_execute_complex_realistic() {
 
     let resolver = bench_path_resolver();
 
-    //let expression = r#"set(my.int.value, 100) where (my.int.status == STATUS_OK or my.int.status < STATUS_ERROR) and my.bool.enabled"#;
-    let expression = r#"set(my.int.value, 100)"#;
+    let expression = r#"set(my.int.value, my.int.status + 100) where (my.int.status == STATUS_OK or my.int.status < STATUS_ERROR) and my.bool.enabled"#;
     let parser = Parser::new(&editors, &converters, &enums, &resolver, expression);
     assert!(parser.is_error().is_ok(), "Parse failed");
 
-    run_benchmark("complex_realistic", &parser, 100_000);
-}
+    let mut ctx = bench_context();
+    run_benchmark("complex_realistic", &parser, &mut ctx, 100_000);
 
-/// Benchmark: Parser creation (parse time, not execute time)
-#[test]
-#[ignore]
-fn bench_parser_creation() {
-    use std::time::Instant;
-
-    let editors = CallbackMap::new();
-    let converters = CallbackMap::new();
-    let enums = EnumMap::new();
-    let resolver = bench_path_resolver();
-
-    let expression = "((1 + 2) * (3 + 4)) / ((5 - 2) * (6 - 4)) + (10 * (2 + 3))";
-
-    let iterations = 10_000;
-    let start = Instant::now();
-
-    for _ in 0..iterations {
-        let parser = Parser::new(&editors, &converters, &enums, &resolver, expression);
-        std::hint::black_box(&parser);
+    if let Some(bench_ctx) = ctx.downcast_ref::<BenchContext>() {
+        println!("my_int_value after benchmark: {}", bench_ctx.my_int_value);
     }
-
-    let elapsed = start.elapsed();
-    let avg_ns = elapsed.as_nanos() / iterations as u128;
-
-    println!("\n========================================");
-    println!("BENCHMARK: parser_creation");
-    println!("========================================");
-    println!("Expression: {}", expression);
-    println!("Iterations: {}", iterations);
-    println!("Total time: {:?}", elapsed);
-    println!(
-        "Avg time:   {} ns ({:.2} µs)",
-        avg_ns,
-        avg_ns as f64 / 1000.0
-    );
-    println!(
-        "Throughput: {:.0} parses/sec",
-        iterations as f64 / elapsed.as_secs_f64()
-    );
-    println!("========================================\n");
 }
 
 /// Run a benchmark for parser.execute()
-fn run_benchmark(name: &str, parser: &Parser, iterations: usize) {
+fn run_benchmark(name: &str, parser: &Parser, ctx: &mut EvalContext, iterations: usize) {
     use std::time::Instant;
-
-    let mut ctx = stub_context();
 
     // Warmup
     for _ in 0..1000 {
-        let _ = parser.execute(&mut ctx);
+        let _ = parser.execute(ctx);
     }
 
     // Benchmark
@@ -2231,7 +2104,7 @@ fn run_benchmark(name: &str, parser: &Parser, iterations: usize) {
 
     for _ in 0..iterations {
         let start = Instant::now();
-        let result = parser.execute(&mut ctx);
+        let result = parser.execute(ctx);
         let elapsed = start.elapsed().as_nanos();
         times_ns.push(elapsed);
         let _ = std::hint::black_box(result);

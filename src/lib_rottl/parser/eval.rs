@@ -123,6 +123,29 @@ impl<'a> Args for ArenaArgs<'a> {
             ArenaArgExpr::Named { name, .. } => Some(name),
         }
     }
+
+    #[inline]
+    fn set(&mut self, index: usize, value: &Value) -> Result<()> {
+        if index >= self.args.len() {
+            return Err(format!("Argument index {} out of bounds", index).into());
+        }
+
+        let value_ref = match &self.args[index] {
+            ArenaArgExpr::Positional(r) => *r,
+            ArenaArgExpr::Named { value, .. } => *value,
+        };
+
+        let ctx = unsafe { &mut *self.ctx };
+
+        match self.arena.get_value(value_ref) {
+            ArenaValueExpr::Path(resolved_path) => {
+                resolved_path
+                    .accessor
+                    .set(ctx, &resolved_path.full_path, value)
+            }
+            _ => Err("set: argument must be a path expression".into()),
+        }
+    }
 }
 
 /// Evaluate the arena-based root expression

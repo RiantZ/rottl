@@ -383,15 +383,22 @@ fn test_value_equality() {
 #[test]
 fn test_argument_access() {
     let pos = Argument::Positional(Value::Int(42));
-    assert_eq!(pos.name(), None);
-    assert_eq!(*pos.value(), Value::Int(42));
+    match &pos {
+        Argument::Positional(v) => assert_eq!(v, &Value::Int(42)),
+        _ => panic!("expected Positional"),
+    }
 
     let named = Argument::Named {
         name: "foo".into(),
         value: Value::String("bar".into()),
     };
-    assert_eq!(named.name(), Some("foo"));
-    assert_eq!(*named.value(), Value::String("bar".into()));
+    match &named {
+        Argument::Named { name, value } => {
+            assert_eq!(name, "foo");
+            assert_eq!(value, &Value::String("bar".into()));
+        }
+        _ => panic!("expected Named"),
+    }
 }
 
 // ============================================================================

@@ -76,14 +76,15 @@ pub enum Value {
     Map(HashMap<String, Value>),
 }
 
+///Static methods of Value
 impl Value {
-    /// Create a string value from any string-like type
+    ///Static method: create a string value from any string-like type
     #[inline]
     pub fn string(s: impl Into<Arc<str>>) -> Self {
         Value::String(s.into())
     }
 
-    /// Create a bytes value from any bytes-like type
+    ///Static method:  create a bytes value from any bytes-like type
     #[inline]
     pub fn bytes(b: impl Into<Arc<[u8]>>) -> Self {
         Value::Bytes(b.into())
@@ -102,43 +103,6 @@ pub enum Argument {
     Positional(Value),
     /// Named argument with name and value
     Named { name: String, value: Value },
-}
-
-/// Methods for extracting data from [`Argument`] values.
-///
-/// These methods provide a unified interface for accessing argument values
-/// regardless of whether the argument is positional or named.
-///
-/// # Examples
-///
-/// ```ignore
-/// let pos_arg = Argument::Positional(Value::Int(42));
-/// let named_arg = Argument::Named { name: String::from("count"), value: Value::Int(10) };
-///
-/// // Both return the inner value
-/// assert_eq!(pos_arg.value(), &Value::Int(42));
-/// assert_eq!(named_arg.value(), &Value::Int(10));
-///
-/// // Only named arguments have a name
-/// assert_eq!(pos_arg.name(), None);
-/// assert_eq!(named_arg.name(), Some("count"));
-/// ```
-impl Argument {
-    /// Returns a reference to the value of this argument.
-    pub fn value(&self) -> &Value {
-        match self {
-            Argument::Positional(v) => v,
-            Argument::Named { value, .. } => value,
-        }
-    }
-
-    /// Get the name if this is a named argument
-    pub fn name(&self) -> Option<&str> {
-        match self {
-            Argument::Positional(_) => None,
-            Argument::Named { name, .. } => Some(name),
-        }
-    }
 }
 
 // =====================================================================================================================

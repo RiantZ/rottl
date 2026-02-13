@@ -192,9 +192,12 @@ let mut converters = CallbackMap::new();
 converters.insert("Concat".to_string(), Arc::new(|ctx, args| {
     let mut result = String::new();
     for arg in args {
-        if let Value::String(s) = arg.value() {
-            result.push_str(s);
-        }
+        let s = match &arg {
+            Argument::Positional(Value::String(s)) => s.as_ref(),
+            Argument::Named { value: Value::String(s), .. } => s.as_ref(),
+            _ => continue,
+        };
+        result.push_str(s);
     }
     Ok(Value::String(result))
 }));

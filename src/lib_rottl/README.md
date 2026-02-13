@@ -29,7 +29,7 @@ The library provides a complete pipeline for working with OTTL:
 - Full OTTL grammar support: literals, paths, lists, maps, functions
 - Mathematical expressions with operator precedence
 - Logical expressions with short-circuit evaluation
-- Extensible path system via `PathResolver`
+- Extensible path system via `PathResolverMap` (path → `PathResolver`)
 
 ---
 
@@ -100,8 +100,11 @@ pub type CallbackMap = HashMap<String, CallbackFn>;
 // Map of enum values → their numeric equivalents
 pub type EnumMap = HashMap<String, i64>;
 
-// Path resolver (e.g., "resource.attributes")
-pub type PathResolver = Arc<dyn Fn(&str) -> Result<Arc<dyn PathAccessor + Send + Sync>> + Send + Sync>;
+// Path resolver: returns a PathAccessor for one path (resolved at parse time)
+pub type PathResolver = Arc<dyn Fn() -> Result<Arc<dyn PathAccessor + Send + Sync>> + Send + Sync>;
+
+// Map from path string to PathResolver. Every path used in the expression must have an entry.
+pub type PathResolverMap = HashMap<String, PathResolver>;
 ```
 
 ### PathAccessor
@@ -122,21 +125,25 @@ pub trait PathAccessor: fmt::Debug {
 ### Creating a Parser
 
 ```rust
-use ottl::{Parser, OttlParser, CallbackMap, EnumMap, PathResolver};
+use ottl::{Parser, OttlParser, CallbackMap, EnumMap, PathResolver, PathResolverMap};
 
 let editors: CallbackMap = HashMap::new();
 let converters: CallbackMap = HashMap::new();
 let enums: EnumMap = HashMap::new();
-let resolver: PathResolver = Arc::new(|path| { /* ... */ });
+let mut path_resolvers: PathResolverMap = HashMap::new();
+path_resolvers.insert("resource.attributes".to_string(), Arc::new(|| { /* return Ok(Arc::new(...)) */ }));
+path_resolvers.insert("status".to_string(), Arc::new(|| { /* ... */ }));
 
 let parser = Parser::new(
     &editors,
     &converters,
     &enums,
-    &resolver,
+    &path_resolvers,
     "set(resource.attributes[\"key\"], \"value\") where status == 200"
 );
 ```
+
+If any path in the expression is missing from `path_resolvers`, parsing fails with an error.
 
 ### Checking for Parse Errors
 
@@ -373,7 +380,7 @@ Main library module, exports the public API:
 - `OttlParser` — public API trait
 - `Value`, `Argument` — data types
 - `CallbackFn`, `CallbackMap`, `EnumMap` — callback types
-- `PathAccessor`, `PathResolver` — path handling types
+- `PathAccessor`, `PathResolver`, `PathResolverMap` — path handling types
 - `BoxError`, `Result` — error types
 
 ### `tests.rs`
@@ -420,18 +427,10 @@ cargo test bench_parser_creation -- --ignored --nocapture
 
 ### Benchmark Results
 
-Results from running on Apple M1 Pro (10 cores), 100,000 iterations per benchmark:
-
+Results from running on Apple M4 Max (16 cores), 100,000 iterations per benchmark (release build). 
 | Benchmark | Avg | Median | P99 | Throughput |
 |-----------|-----|--------|-----|------------|
-| **math_simple** | 83 ns | 83 ns | 125 ns | ~12M ops/sec |
-| **math_complex** | 292 ns | 292 ns | 375 ns | ~3.4M ops/sec |
-| **bool_comparisons** | 142 ns | 125 ns | 250 ns | ~7M ops/sec |
-| **with_paths** | 625 ns | 584 ns | 917 ns | ~1.6M ops/sec |
-| **bool_with_paths** | 500 ns | 458 ns | 792 ns | ~2M ops/sec |
-| **with_converters** | 542 ns | 500 ns | 834 ns | ~1.8M ops/sec |
-| **complex_realistic** | 709 ns | 667 ns | 1042 ns | ~1.4M ops/sec |
-| **parser_creation** | 42 µs | — | — | ~24K parses/sec |
+| **complex_realistic** | 70 ns | 83 ns | 84 ns | ~10.6M ops/sec |
 
 ### Benchmark Output Format
 

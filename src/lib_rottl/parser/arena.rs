@@ -4,7 +4,7 @@
 //! - Path resolution at parse time
 //! - Constant folding for literals
 
-use crate::{PathResolver, Result, Value};
+use crate::{PathResolverMap, Result, Value};
 
 use super::ast::*;
 
@@ -79,9 +79,13 @@ impl AstArena {
 // AST to Arena Conversion
 // =====================================================================================================================
 
-/// Helper to resolve a PathExpr to ResolvedPath at parse time
-fn resolve_path(path: &PathExpr, resolver: &PathResolver) -> Result<ResolvedPath> {
+/// Helper to resolve a PathExpr to ResolvedPath at parse time.
+/// Looks up the path in path_resolvers; returns error if no resolver is provided for this path.
+fn resolve_path(path: &PathExpr, path_resolvers: &PathResolverMap) -> Result<ResolvedPath> {
     let full_path = path.segments.join(".");
+    let resolver = path_resolvers
+        .get(&full_path)
+        .ok_or_else(|| format!("No PathResolver provided for path \"{}\"", full_path))?;
     let accessor = resolver()?;
     Ok(ResolvedPath {
         full_path,
@@ -95,13 +99,13 @@ fn resolve_path(path: &PathExpr, resolver: &PathResolver) -> Result<ResolvedPath
 pub fn convert_to_arena(
     root: &RootExpr,
     arena: &mut AstArena,
-    resolver: &PathResolver,
+    path_resolvers: &PathResolverMap,
 ) -> Result<ArenaRootExpr> {
     match root {
         RootExpr::EditorStatement(stmt) => {
-            let editor_ref = convert_function_call(&stmt.editor, arena, resolver)?;
+            let editor_ref = convert_function_call(&stmt.editor, arena, path_resolvers)?;
             let condition_ref = match &stmt.condition {
-                Some(c) => Some(convert_bool_expr(c, arena, resolver)?),
+                Some(c) => Some(convert_bool_expr(c, arena, path_resolvers)?),
                 None => None,
             };
             Ok(ArenaRootExpr::EditorStatement(ArenaEditorStatement {
@@ -110,11 +114,11 @@ pub fn convert_to_arena(
             }))
         }
         RootExpr::BooleanExpression(expr) => {
-            let expr_ref = convert_bool_expr(expr, arena, resolver)?;
+            let expr_ref = convert_bool_expr(expr, arena, path_resolvers)?;
             Ok(ArenaRootExpr::BooleanExpression(expr_ref))
         }
         RootExpr::MathExpression(expr) => {
-            let expr_ref = convert_math_expr(expr, arena, resolver)?;
+            let expr_ref = convert_math_expr(expr, arena, path_resolvers)?;
             Ok(ArenaRootExpr::MathExpression(expr_ref))
         }
     }
@@ -158,7 +162,7 @@ use super::ops::{compare, try_math_op};
 fn convert_bool_expr(
     expr: &BoolExpr,
     arena: &mut AstArena,
-    resolver: &PathResolver,
+    path_resolvers: &PathResolverMap,
 ) -> Result<BoolExprRef> {
     let arena_expr = match expr {
         BoolExpr::Literal(b) => ArenaBoolExpr::Literal(*b),
@@ -171,8 +175,8 @@ fn convert_bool_expr(
                     return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(result)));
                 }
             }
-            let left_ref = convert_value_expr(left, arena, resolver)?;
-            let right_ref = convert_value_expr(right, arena, resolver)?;
+            let left_ref = convert_value_expr(left, arena, path_resolvers)?;
+            let right_ref = convert_value_expr(right, arena, path_resolvers)?;
             ArenaBoolExpr::Comparison {
                 left: left_ref,
                 op: *op,
@@ -180,15 +184,15 @@ fn convert_bool_expr(
             }
         }
         BoolExpr::Converter(fc) => {
-            let fc_ref = convert_function_call(fc, arena, resolver)?;
+            let fc_ref = convert_function_call(fc, arena, path_resolvers)?;
             ArenaBoolExpr::Converter(fc_ref)
         }
         BoolExpr::Path(path) => {
-            let resolved = resolve_path(path, resolver)?;
+            let resolved = resolve_path(path, path_resolvers)?;
             ArenaBoolExpr::Path(resolved)
         }
         BoolExpr::Not(inner) => {
-            let inner_ref = convert_bool_expr(inner, arena, resolver)?;
+            let inner_ref = convert_bool_expr(inner, arena, path_resolvers)?;
             // CONSTANT FOLDING: not(literal) => !literal
             if let Some(b) = arena_bool_is_literal(arena, inner_ref) {
                 return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(!b)));
@@ -196,15 +200,15 @@ fn convert_bool_expr(
             ArenaBoolExpr::Not(inner_ref)
         }
         BoolExpr::And(left, right) => {
-            let left_ref = convert_bool_expr(left, arena, resolver)?;
+            let left_ref = convert_bool_expr(left, arena, path_resolvers)?;
             // CONSTANT FOLDING: false && x => false, true && x => x
             if let Some(left_val) = arena_bool_is_literal(arena, left_ref) {
                 if !left_val {
                     return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(false)));
                 }
-                return convert_bool_expr(right, arena, resolver);
+                return convert_bool_expr(right, arena, path_resolvers);
             }
-            let right_ref = convert_bool_expr(right, arena, resolver)?;
+            let right_ref = convert_bool_expr(right, arena, path_resolvers)?;
             // CONSTANT FOLDING: x && false => false, x && true => x
             if let Some(right_val) = arena_bool_is_literal(arena, right_ref) {
                 if !right_val {
@@ -215,15 +219,15 @@ fn convert_bool_expr(
             ArenaBoolExpr::And(left_ref, right_ref)
         }
         BoolExpr::Or(left, right) => {
-            let left_ref = convert_bool_expr(left, arena, resolver)?;
+            let left_ref = convert_bool_expr(left, arena, path_resolvers)?;
             // CONSTANT FOLDING: true || x => true, false || x => x
             if let Some(left_val) = arena_bool_is_literal(arena, left_ref) {
                 if left_val {
                     return Ok(arena.alloc_bool(ArenaBoolExpr::Literal(true)));
                 }
-                return convert_bool_expr(right, arena, resolver);
+                return convert_bool_expr(right, arena, path_resolvers);
             }
-            let right_ref = convert_bool_expr(right, arena, resolver)?;
+            let right_ref = convert_bool_expr(right, arena, path_resolvers)?;
             // CONSTANT FOLDING: x || true => true, x || false => x
             if let Some(right_val) = arena_bool_is_literal(arena, right_ref) {
                 if right_val {
@@ -240,11 +244,11 @@ fn convert_bool_expr(
 fn convert_math_expr(
     expr: &MathExpr,
     arena: &mut AstArena,
-    resolver: &PathResolver,
+    path_resolvers: &PathResolverMap,
 ) -> Result<MathExprRef> {
     let arena_expr = match expr {
         MathExpr::Primary(v) => {
-            let v_ref = convert_value_expr(v, arena, resolver)?;
+            let v_ref = convert_value_expr(v, arena, path_resolvers)?;
             ArenaMathExpr::Primary(v_ref)
         }
         MathExpr::Negate(inner) => {
@@ -260,7 +264,7 @@ fn convert_math_expr(
                     return Ok(arena.alloc_math(ArenaMathExpr::Primary(v_ref)));
                 }
             }
-            let inner_ref = convert_math_expr(inner, arena, resolver)?;
+            let inner_ref = convert_math_expr(inner, arena, path_resolvers)?;
             ArenaMathExpr::Negate(inner_ref)
         }
         MathExpr::Binary { left, op, right } => {
@@ -273,8 +277,8 @@ fn convert_math_expr(
                     return Ok(arena.alloc_math(ArenaMathExpr::Primary(v_ref)));
                 }
             }
-            let left_ref = convert_math_expr(left, arena, resolver)?;
-            let right_ref = convert_math_expr(right, arena, resolver)?;
+            let left_ref = convert_math_expr(left, arena, path_resolvers)?;
+            let right_ref = convert_math_expr(right, arena, path_resolvers)?;
             ArenaMathExpr::Binary {
                 left: left_ref,
                 op: *op,
@@ -288,34 +292,34 @@ fn convert_math_expr(
 fn convert_value_expr(
     expr: &ValueExpr,
     arena: &mut AstArena,
-    resolver: &PathResolver,
+    path_resolvers: &PathResolverMap,
 ) -> Result<ValueExprRef> {
     let arena_expr = match expr {
         ValueExpr::Literal(v) => ArenaValueExpr::Literal(v.clone()),
         ValueExpr::Path(path) => {
-            let resolved = resolve_path(path, resolver)?;
+            let resolved = resolve_path(path, path_resolvers)?;
             ArenaValueExpr::Path(resolved)
         }
         ValueExpr::List(items) => {
             let refs: Result<Vec<_>> = items
                 .iter()
-                .map(|i| convert_value_expr(i, arena, resolver))
+                .map(|i| convert_value_expr(i, arena, path_resolvers))
                 .collect();
             ArenaValueExpr::List(refs?)
         }
         ValueExpr::Map(entries) => {
             let refs: Result<Vec<_>> = entries
                 .iter()
-                .map(|(k, v)| Ok((k.clone(), convert_value_expr(v, arena, resolver)?)))
+                .map(|(k, v)| Ok((k.clone(), convert_value_expr(v, arena, path_resolvers)?)))
                 .collect();
             ArenaValueExpr::Map(refs?)
         }
         ValueExpr::FunctionCall(fc) => {
-            let fc_ref = convert_function_call(fc, arena, resolver)?;
+            let fc_ref = convert_function_call(fc, arena, path_resolvers)?;
             ArenaValueExpr::FunctionCall(fc_ref)
         }
         ValueExpr::Math(m) => {
-            let m_ref = convert_math_expr(m, arena, resolver)?;
+            let m_ref = convert_math_expr(m, arena, path_resolvers)?;
             ArenaValueExpr::Math(m_ref)
         }
     };
@@ -325,18 +329,18 @@ fn convert_value_expr(
 fn convert_function_call(
     fc: &FunctionCall,
     arena: &mut AstArena,
-    resolver: &PathResolver,
+    path_resolvers: &PathResolverMap,
 ) -> Result<FunctionCallRef> {
     let args: Result<Vec<_>> = fc
         .args
         .iter()
         .map(|arg| match arg {
             ArgExpr::Positional(v) => Ok(ArenaArgExpr::Positional(convert_value_expr(
-                v, arena, resolver,
+                v, arena, path_resolvers,
             )?)),
             ArgExpr::Named { name, value } => Ok(ArenaArgExpr::Named {
                 name: name.clone(),
-                value: convert_value_expr(value, arena, resolver)?,
+                value: convert_value_expr(value, arena, path_resolvers)?,
             }),
         })
         .collect();

@@ -6,14 +6,14 @@
 /// # Example
 ///
 /// ```ignore
-/// use ottl::{Parser, OttlParser, CallbackMap, EnumMap, PathResolver};
+/// use ottl::{Parser, OttlParser, CallbackMap, EnumMap, PathResolverMap};
 ///
 /// let editors = CallbackMap::new();
 /// let converters = CallbackMap::new();
 /// let enums = EnumMap::new();
-/// let resolver = ...;
+/// let path_resolvers = PathResolverMap::new(); // or insert path -> PathResolver for each path in expression
 ///
-/// let parser = Parser::new(&editors, &converters, &enums, &resolver, "set(\"my.attr\", 1) where 1 > 0");
+/// let parser = Parser::new(&editors, &converters, &enums, &path_resolvers, "set(my.attr, 1) where 1 > 0");
 /// let result = parser.execute(&mut ctx);
 /// ```
 use std::any::Any;
@@ -123,6 +123,10 @@ pub trait PathAccessor: fmt::Debug {
 /// Type alias for the path resolver function.
 /// Returns a PathAccessor.
 pub type PathResolver = Arc<dyn Fn() -> Result<Arc<dyn PathAccessor + Send + Sync>> + Send + Sync>;
+
+/// Map from path string to its resolver. Parser looks up each path in the expression
+/// in this map; if a path is missing, parsing fails with an error.
+pub type PathResolverMap = HashMap<String, PathResolver>;
 
 // =====================================================================================================================
 // Callback Types

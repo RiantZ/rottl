@@ -37,7 +37,7 @@ pub enum IndexExpr {
     /// String index like ["key"]
     String(String),
     /// Integer index like [0]
-    Int(i64),
+    Int(usize),
 }
 
 // =====================================================================================================================

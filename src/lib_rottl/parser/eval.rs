@@ -33,12 +33,7 @@ fn evaluate_resolved_path(path: &ResolvedPath, ctx: &EvalContext) -> Result<Valu
 fn apply_index(value: &Value, index: &IndexExpr) -> Result<Value> {
     match (value, index) {
         (Value::List(list), IndexExpr::Int(i)) => {
-            let idx = if *i < 0 {
-                (list.len() as i64 + i) as usize
-            } else {
-                *i as usize
-            };
-            list.get(idx)
+            list.get(*i)
                 .cloned()
                 .ok_or_else(|| format!("Index {} out of bounds", i).into())
         }
@@ -47,13 +42,8 @@ fn apply_index(value: &Value, index: &IndexExpr) -> Result<Value> {
             .cloned()
             .ok_or_else(|| format!("Key '{}' not found", key).into()),
         (Value::String(s), IndexExpr::Int(i)) => {
-            let idx = if *i < 0 {
-                (s.len() as i64 + i) as usize
-            } else {
-                *i as usize
-            };
             s.chars()
-                .nth(idx)
+                .nth(*i)
                 .map(|c| Value::string(c.to_string()))
                 .ok_or_else(|| format!("Index {} out of bounds", i).into())
         }

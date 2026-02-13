@@ -89,7 +89,7 @@ fn index_parser<'a>() -> impl chumsky::Parser<'a, TokenInput<'a>, IndexExpr, Par
 {
     choice((
         select_ref! { Token::StringLiteral(s) => IndexExpr::String(unescape(s)) },
-        select_ref! { Token::IntLiteral(s) => IndexExpr::Int(s.parse().unwrap_or(0)) },
+        select_ref! { Token::IntLiteral(s) => IndexExpr::Int(s.parse::<usize>().unwrap_or(0)) },
     ))
     .delimited_by(just(&Token::LBracket), just(&Token::RBracket))
 }

@@ -1986,11 +1986,6 @@ fn test_runtime_error_bool_comparison_invalid_op() {
 // Performance Benchmarks (run with: cargo test bench_ -- --ignored --nocapture)
 // ============================================================================
 
-/// Creates a BenchPathAccessor for the given path
-fn create_bench_accessor() -> crate::Result<Arc<dyn PathAccessor + Send + Sync>> {
-    Ok(Arc::new(BenchPathAccessor {}))
-}
-
 /// Benchmark context that stores path values
 #[derive(Debug)]
 struct BenchContext {
@@ -2007,16 +2002,6 @@ impl BenchContext {
             my_bool_enabled: true,
         }
     }
-}
-
-/// Creates a benchmark context with pre-initialized values
-fn bench_context() -> EvalContext {
-    Box::new(BenchContext::new())
-}
-
-/// Benchmark helper: creates a mock path resolver with configurable values
-fn bench_path_resolver() -> PathResolver {
-    Arc::new(create_bench_accessor)
 }
 
 #[derive(Debug)]
@@ -2082,13 +2067,14 @@ fn bench_execute_complex_realistic() {
     enums.insert("STATUS_OK".to_string(), 200);
     enums.insert("STATUS_ERROR".to_string(), 500);
 
-    let resolver = bench_path_resolver();
+    let resolver: PathResolver =
+        Arc::new(|| Ok(Arc::new(BenchPathAccessor {}) as Arc<dyn PathAccessor + Send + Sync>));
 
     let expression = r#"set(my.int.value, my.int.status + 100) where (my.int.status == STATUS_OK or my.int.status < STATUS_ERROR) and my.bool.enabled"#;
     let parser = Parser::new(&editors, &converters, &enums, &resolver, expression);
     assert!(parser.is_error().is_ok(), "Parse failed");
 
-    let mut ctx = bench_context();
+    let mut ctx: EvalContext = Box::new(BenchContext::new());
     run_benchmark("complex_realistic", &parser, &mut ctx, 100_000);
 
     if let Some(bench_ctx) = ctx.downcast_ref::<BenchContext>() {
